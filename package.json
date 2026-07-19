@@ -1,0 +1,14 @@
+{
+  "name": "aitheron-treasure-hunt",
+  "version": "1.0.0",
+  "description": "Aitheron ML 2026 QR Treasure Hunt Application",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "emulators": "firebase emulators:start --project demo-aitheron",
+    "seed": "node functions/seed_emulators.js"
+  },
+  "devDependencies": {
+    "firebase-tools": "^13.15.4"
+  }
+}
