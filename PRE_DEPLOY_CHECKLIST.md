@@ -43,9 +43,15 @@ Ensure all the following tasks are checked and verified before initiating the pr
   }
   ```
 
-## 5. Firebase Production Setup
+## 5. Firebase Production Setup (Spark Plan Free Tier)
 - [ ] Create a new production Firebase project inside the [Firebase Console](https://console.firebase.google.com/).
-- [ ] Enable **Firebase Authentication** and turn on **Email/Password** sign-in.
+- [ ] Enable **Firebase Authentication** and turn on **Email/Password** sign-in (required for admins and teams).
 - [ ] Enable **Cloud Firestore** in production mode.
-- [ ] Verify security rules in [`firestore.rules`](file:///c:/Users/vivek/treassure%20hunt/firestore.rules).
-- [ ] Verify storage rules in [`storage.rules`](file:///c:/Users/vivek/treassure%20hunt/storage.rules).
+- [ ] Deploy security rules using Firebase CLI:
+  ```bash
+  firebase deploy --only firestore:rules
+  ```
+- [ ] Deploy storage rules using Firebase CLI:
+  ```bash
+  firebase deploy --only storage:rules
+  ```

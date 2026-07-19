@@ -5,14 +5,16 @@ import {
   Compass, Camera, AlertCircle, RefreshCw, ArrowLeft, 
   HelpCircle, CheckCircle, Zap, ShieldAlert, Award, Lock, Sparkles
 } from 'lucide-react';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../firebase/config';
+import { doc, getDoc, addDoc, collection, writeBatch, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase/config';
+import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 
 export default function Scanner() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const scannerRef = useRef(null);
+  const { user } = useAuth();
 
   // Scanning State
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -26,6 +28,166 @@ export default function Scanner() {
   const [verifiedClue, setVerifiedClue] = useState(null);
   const [showHint, setShowHint] = useState(false);
   const [errorDetails, setErrorDetails] = useState('');
+
+  const validateQRLocal = async (qrId, token, device) => {
+    const eventSnap = await getDoc(doc(db, 'events', 'active_event'));
+    if (!eventSnap.exists()) {
+      throw new Error('No active event configured.');
+    }
+    const eventData = eventSnap.data();
+
+    if (['draft', 'registration_open', 'registration_closed', 'ready'].includes(eventData.status)) {
+      throw new Error('AITHERON ML 2026 has not started yet. QR scanning is disabled.');
+    } else if (eventData.status === 'paused') {
+      throw new Error('AITHERON ML 2026 is paused. Checkpoint scanning is suspended.');
+    } else if (['completed', 'archived'].includes(eventData.status)) {
+      throw new Error('AITHERON ML 2026 has ended. Scanning is inactive.');
+    } else if (eventData.status !== 'running') {
+      throw new Error('QR scanning is not active at this time.');
+    }
+
+    if (eventData.scans_locked) {
+      throw new Error('Scanning is locked. Contact coordinator.');
+    }
+
+    const teamId = user?.uid;
+    if (!teamId) {
+      throw new Error('User not authenticated.');
+    }
+    const teamSnap = await getDoc(doc(db, 'teams', teamId));
+    if (!teamSnap.exists()) {
+      throw new Error('Team document not found.');
+    }
+    const teamData = teamSnap.data();
+
+    if (teamData.status === 'disqualified') {
+      throw new Error('Disqualified teams cannot scan checkpoints.');
+    }
+
+    const qrSnap = await getDoc(doc(db, 'qrCodes', qrId));
+    if (!qrSnap.exists()) {
+      await addDoc(collection(db, 'scanLogs'), {
+        team_id: teamId,
+        team_name: teamData.team_name,
+        qr_id: qrId,
+        status: 'invalid_sequence',
+        timestamp: serverTimestamp(),
+        device: device || 'Unknown',
+        ip_address: '127.0.0.1'
+      });
+      throw new Error('Invalid QR code.');
+    }
+    const qrData = qrSnap.data();
+
+    if (qrData.secret_token !== token) {
+      throw new Error('Invalid QR secret token.');
+    }
+
+    const clueSnap = await getDoc(doc(db, 'clues', qrData.clue_id));
+    if (!clueSnap.exists()) {
+      throw new Error('Associated clue not found.');
+    }
+    const clueData = clueSnap.data();
+
+    if (clueData.route_id !== teamData.route_id) {
+      await addDoc(collection(db, 'scanLogs'), {
+        team_id: teamId,
+        team_name: teamData.team_name,
+        qr_id: qrId,
+        status: 'wrong_route',
+        timestamp: serverTimestamp(),
+        device: device || 'Unknown',
+        ip_address: '127.0.0.1'
+      });
+      return { status: 'wrong_route', message: 'This QR does not belong to your assigned route.', clue: { id: qrData.clue_id, ...clueData } };
+    }
+
+    const targetSeq = clueData.sequence;
+    const currentSeq = teamData.current_sequence;
+
+    if (targetSeq < currentSeq) {
+      return { status: 'already_scanned', message: 'You have already solved this checkpoint.', clue: { id: qrData.clue_id, ...clueData } };
+    } else if (targetSeq > currentSeq) {
+      await addDoc(collection(db, 'scanLogs'), {
+        team_id: teamId,
+        team_name: teamData.team_name,
+        qr_id: qrId,
+        status: 'invalid_sequence',
+        timestamp: serverTimestamp(),
+        device: device || 'Unknown',
+        ip_address: '127.0.0.1'
+      });
+      return { status: 'invalid_sequence', message: 'Checkpoint scanned out of order.', clue: { id: qrData.clue_id, ...clueData } };
+    }
+
+    const isFirstClue = currentSeq === 1 && (teamData.status === 'registered' || teamData.status === 'checked_in');
+    const isLastClue = currentSeq >= eventData.num_clues_per_route;
+
+    const updates = {};
+    let statusResult = 'success';
+
+    if (isFirstClue) {
+      updates.status = 'active';
+      updates.start_time = serverTimestamp();
+      statusResult = 'success';
+    }
+
+    if (isLastClue) {
+      updates.status = 'finished';
+      updates.finish_time = serverTimestamp();
+      statusResult = 'finished';
+    } else {
+      updates.current_sequence = currentSeq + 1;
+    }
+
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'teams', teamId), updates);
+
+    batch.set(doc(collection(db, 'scanLogs')), {
+      team_id: teamId,
+      team_name: teamData.team_name,
+      qr_id: qrId,
+      status: 'valid',
+      timestamp: serverTimestamp(),
+      device: device || 'Unknown',
+      ip_address: '127.0.0.1'
+    });
+
+    let auditDetails = `Team scanned checkpoint clue #${currentSeq}.`;
+    let actionType = 'team_scan';
+    if (isFirstClue) {
+      auditDetails = 'Team started the treasure hunt.';
+      actionType = 'team_start';
+    } else if (isLastClue) {
+      auditDetails = 'Team successfully completed the treasure hunt!';
+      actionType = 'team_finish';
+    }
+    batch.set(doc(collection(db, 'auditLogs')), {
+      action_type: actionType,
+      performed_by: teamData.leader_name || 'Team',
+      timestamp: serverTimestamp(),
+      ip_address: '127.0.0.1',
+      affected_team: teamData.team_name,
+      details: auditDetails
+    });
+
+    const elapsedSeconds = isLastClue 
+      ? Math.max(0, Math.floor((Date.now() - (teamData.start_time ? (teamData.start_time.toMillis ? teamData.start_time.toMillis() : teamData.start_time.seconds * 1000) : Date.now())) / 1000)) 
+      : 0;
+    
+    batch.set(doc(db, 'leaderboard', teamId), {
+      team_name: teamData.team_name,
+      status: updates.status || teamData.status,
+      current_sequence: updates.current_sequence || teamData.current_sequence,
+      elapsed_seconds: elapsedSeconds - ((teamData.bonus_time_minutes || 0) * 60) + ((teamData.time_penalty_minutes || 0) * 60),
+      hints_used: teamData.hints_used || 0,
+      finish_time: isLastClue ? serverTimestamp() : null
+    }, { merge: true });
+
+    await batch.commit();
+
+    return { status: statusResult, clue: { id: qrData.clue_id, ...clueData } };
+  };
 
   // Start the QR Scanner
   const startScanner = async () => {
@@ -80,9 +242,8 @@ export default function Scanner() {
       const verifyDirectLink = async () => {
         setLoading(true);
         try {
-          const validateQRFn = httpsCallable(functions, 'validateQR');
-          const res = await validateQRFn({ qr_id: qrId, token: token, device: 'Browser QR Link', ip_address: '127.0.0.1' });
-          const { status, message, clue } = res.data;
+          const res = await validateQRLocal(qrId, token, 'Browser QR Link');
+          const { status, message, clue } = res;
           setLoading(false);
           if (status === 'success' || status === 'finished') {
             setVerifiedClue(clue);
@@ -148,9 +309,8 @@ export default function Scanner() {
         throw new Error("Invalid QR Code structure.");
       }
 
-      const validateQRFn = httpsCallable(functions, 'validateQR');
-      const res = await validateQRFn({ qr_id: qrId, token: token, device: 'Mobile Camera', ip_address: '127.0.0.1' });
-      const { status, message, clue } = res.data;
+      const res = await validateQRLocal(qrId, token, 'Mobile Camera');
+      const { status, message, clue } = res;
 
       setLoading(false);
 

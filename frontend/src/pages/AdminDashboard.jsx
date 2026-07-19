@@ -9,10 +9,11 @@ import {
 } from 'lucide-react';
 import { 
   collection, doc, onSnapshot, getDocs, getDoc, addDoc, updateDoc, deleteDoc, 
-  query, where, orderBy, limit, writeBatch, serverTimestamp 
+  query, where, orderBy, limit, writeBatch, serverTimestamp, setDoc, Timestamp 
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { db, functions } from '../firebase/config';
+import { db, firebaseConfig } from '../firebase/config';
+import { initializeApp } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
 import toast from 'react-hot-toast';
 import QRCode from 'qrcode';
 
@@ -233,6 +234,55 @@ export default function AdminDashboard() {
 
   const sortedLeaderboard = getSortedLeaderboard();
 
+  const logAuditLocal = async (actionType, performedBy, ipAddress, affectedTeam, details) => {
+    await addDoc(collection(db, 'auditLogs'), {
+      action_type: actionType,
+      performed_by: performedBy,
+      timestamp: serverTimestamp(),
+      ip_address: ipAddress || '127.0.0.1',
+      affected_team: affectedTeam || null,
+      details: details
+    });
+  };
+
+  const updateLeaderboardDocLocal = async (teamId, teamData = null) => {
+    if (!teamData) {
+      const snap = await getDoc(doc(db, 'teams', teamId));
+      if (snap.exists()) {
+        teamData = snap.data();
+      } else {
+        return;
+      }
+    }
+    
+    let elapsedSeconds = 0;
+    if (teamData.start_time) {
+      const start = teamData.start_time.toMillis ? teamData.start_time.toMillis() : (teamData.start_time.seconds ? teamData.start_time.seconds * 1000 : new Date(teamData.start_time).getTime());
+      const end = teamData.finish_time 
+        ? (teamData.finish_time.toMillis ? teamData.finish_time.toMillis() : (teamData.finish_time.seconds ? teamData.finish_time.seconds * 1000 : new Date(teamData.finish_time).getTime()))
+        : Date.now();
+      let duration = (end - start) / 1000;
+      
+      let totalPause = teamData.total_paused_duration_seconds || 0;
+      if (teamData.status === 'paused' && teamData.paused_at) {
+        const pauseStart = teamData.paused_at.toMillis ? teamData.paused_at.toMillis() : (teamData.paused_at.seconds ? teamData.paused_at.seconds * 1000 : new Date(teamData.paused_at).getTime());
+        totalPause += (Date.now() - pauseStart) / 1000;
+      }
+      
+      duration = duration - totalPause - ((teamData.bonus_time_minutes || 0) * 60) + ((teamData.time_penalty_minutes || 0) * 60);
+      elapsedSeconds = Math.max(0, Math.floor(duration));
+    }
+
+    await setDoc(doc(db, 'leaderboard', teamId), {
+      team_name: teamData.team_name,
+      status: teamData.status,
+      current_sequence: teamData.current_sequence || 1,
+      elapsed_seconds: elapsedSeconds,
+      hints_used: teamData.hints_used || 0,
+      finish_time: teamData.finish_time || null
+    }, { merge: true });
+  };
+
   // Control Action triggers
   const triggerEventAction = async (action, extra = {}) => {
     if (action === 'end' && !window.confirm('Are you sure you want to end the event?')) return;
@@ -241,8 +291,148 @@ export default function AdminDashboard() {
 
     try {
       toast.loading(`Applying ${action}...`);
-      const controlFn = httpsCallable(functions, 'controlEvent');
-      await controlFn({ action, ...extra });
+      
+      const eventRef = doc(db, 'events', 'active_event');
+      const adminUser = user?.username || 'admin';
+      const ip = '127.0.0.1';
+
+      if (action === 'start') {
+        await updateDoc(eventRef, {
+          status: 'running',
+          event_start: serverTimestamp()
+        });
+        await logAuditLocal('event_control', adminUser, ip, null, 'Admin launched the event.');
+      } else if (action === 'pause') {
+        await updateDoc(eventRef, {
+          status: 'paused',
+          paused_at: serverTimestamp()
+        });
+        
+        const batch = writeBatch(db);
+        const activeTeams = teams.filter(t => t.status === 'active');
+        activeTeams.forEach(t => {
+          batch.update(doc(db, 'teams', t.id), {
+            status: 'paused',
+            paused_at: serverTimestamp()
+          });
+        });
+        await batch.commit();
+        await logAuditLocal('event_control', adminUser, ip, null, 'Suspended checkpoint scanning globally.');
+      } else if (action === 'resume') {
+        const eventDoc = await getDoc(eventRef);
+        const eventData = eventDoc.data();
+        const pauseStart = eventData.paused_at ? (eventData.paused_at.toMillis ? eventData.paused_at.toMillis() : eventData.paused_at.seconds * 1000) : Date.now();
+        const pauseDur = Math.floor((Date.now() - pauseStart) / 1000);
+        const prevPause = eventData.total_paused_duration_seconds || 0;
+
+        await updateDoc(eventRef, {
+          status: 'running',
+          paused_at: null,
+          total_paused_duration_seconds: prevPause + pauseDur
+        });
+
+        const batch = writeBatch(db);
+        const pausedTeams = teams.filter(t => t.status === 'paused');
+        pausedTeams.forEach(t => {
+          const tPauseStart = t.paused_at ? (t.paused_at.toMillis ? t.paused_at.toMillis() : t.paused_at.seconds * 1000) : Date.now();
+          const tPauseDur = Math.floor((Date.now() - tPauseStart) / 1000);
+          const tPrevPause = t.total_paused_duration_seconds || 0;
+          batch.update(doc(db, 'teams', t.id), {
+            status: 'active',
+            paused_at: null,
+            total_paused_duration_seconds: tPrevPause + tPauseDur
+          });
+        });
+        await batch.commit();
+        await logAuditLocal('event_control', adminUser, ip, null, 'Resumed the event. Scanning re-enabled.');
+      } else if (action === 'end') {
+        await updateDoc(eventRef, {
+          status: 'completed',
+          event_end: serverTimestamp()
+        });
+
+        const batch = writeBatch(db);
+        const activeOrPausedTeams = teams.filter(t => ['active', 'paused'].includes(t.status));
+        activeOrPausedTeams.forEach(t => {
+          batch.update(doc(db, 'teams', t.id), {
+            status: 'finished',
+            finish_time: serverTimestamp()
+          });
+        });
+        await batch.commit();
+        await logAuditLocal('event_control', adminUser, ip, null, 'Event marked as completed. All active team timers stopped.');
+      } else if (action === 'lock_scans') {
+        await updateDoc(eventRef, { scans_locked: true });
+        await logAuditLocal('event_control', adminUser, ip, null, 'Locked scans globally.');
+      } else if (action === 'unlock_scans') {
+        await updateDoc(eventRef, { scans_locked: false });
+        await logAuditLocal('event_control', adminUser, ip, null, 'Unlocked scans globally.');
+      } else if (action === 'freeze_leaderboard') {
+        await updateDoc(eventRef, { leaderboard_frozen: true });
+        await logAuditLocal('event_control', adminUser, ip, null, 'Froze leaderboard updates.');
+      } else if (action === 'unfreeze_leaderboard') {
+        await updateDoc(eventRef, { leaderboard_frozen: false });
+        await logAuditLocal('event_control', adminUser, ip, null, 'Unfroze leaderboard updates.');
+      } else if (action === 'hide_leaderboard') {
+        await updateDoc(eventRef, { leaderboard_hidden: true });
+        await logAuditLocal('event_control', adminUser, ip, null, 'Hid leaderboard from team dashboards.');
+      } else if (action === 'show_leaderboard') {
+        await updateDoc(eventRef, { leaderboard_hidden: false });
+        await logAuditLocal('event_control', adminUser, ip, null, 'Exposed leaderboard to team dashboards.');
+      } else if (action === 'soft_reset') {
+        const scanLogsSnaps = await getDocs(collection(db, 'scanLogs'));
+        let batch = writeBatch(db);
+        scanLogsSnaps.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+
+        batch = writeBatch(db);
+        teams.forEach(t => {
+          batch.update(doc(db, 'teams', t.id), {
+            start_time: null,
+            finish_time: null,
+            status: 'registered',
+            current_sequence: 1,
+            time_penalty_minutes: 0,
+            bonus_time_minutes: 0,
+            hints_used: 0,
+            total_paused_duration_seconds: 0,
+            paused_at: null
+          });
+        });
+        await batch.commit();
+
+        const lbSnaps = await getDocs(collection(db, 'leaderboard'));
+        batch = writeBatch(db);
+        lbSnaps.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+
+        await updateDoc(eventRef, {
+          paused_at: null,
+          total_paused_duration_seconds: 0
+        });
+        await logAuditLocal('event_control', adminUser, ip, null, 'Soft reset completed. Wiped logs and progress.');
+      } else if (action === 'full_reset') {
+        let batch = writeBatch(db);
+        const scanLogsSnaps = await getDocs(collection(db, 'scanLogs'));
+        scanLogsSnaps.forEach(doc => batch.delete(doc.ref));
+        const teamsSnaps = await getDocs(collection(db, 'teams'));
+        teamsSnaps.forEach(doc => batch.delete(doc.ref));
+        const lbSnaps = await getDocs(collection(db, 'leaderboard'));
+        lbSnaps.forEach(doc => batch.delete(doc.ref));
+        const cluesSnaps = await getDocs(collection(db, 'clues'));
+        cluesSnaps.forEach(doc => batch.delete(doc.ref));
+        const routesSnaps = await getDocs(collection(db, 'routes'));
+        routesSnaps.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+
+        await updateDoc(eventRef, {
+          status: 'draft',
+          paused_at: null,
+          total_paused_duration_seconds: 0
+        });
+        await logAuditLocal('event_control', adminUser, ip, null, 'CRITICAL: Full reset completed. Cleared database completely.');
+      }
+
       toast.dismiss();
       toast.success(`Action '${action}' applied successfully.`);
     } catch (err) {
@@ -254,8 +444,70 @@ export default function AdminDashboard() {
   const triggerTeamOverride = async (teamId, action, extra = {}) => {
     try {
       toast.loading(`Applying override...`);
-      const overrideFn = httpsCallable(functions, 'overrideTeam');
-      await overrideFn({ team_id: teamId, action, ...extra });
+      
+      const teamRef = doc(db, 'teams', teamId);
+      const teamSnap = await getDoc(teamRef);
+      if (!teamSnap.exists()) {
+        throw new Error('Team not found.');
+      }
+      const teamData = teamSnap.data();
+      const adminEmail = user?.username || 'admin';
+      const ip = '127.0.0.1';
+
+      const updates = {};
+      let auditDetails = '';
+
+      if (action === 'unlock_next') {
+        const nextSeq = teamData.current_sequence + 1;
+        updates.current_sequence = nextSeq;
+        auditDetails = `Manually unlocked next sequence (${nextSeq}) clue.`;
+      } else if (action === 'skip_current') {
+        const nextSeq = teamData.current_sequence + 1;
+        updates.current_sequence = nextSeq;
+        auditDetails = `Skipped checkpoint sequence ${teamData.current_sequence}.`;
+      } else if (action === 'restart') {
+        updates.start_time = null;
+        updates.finish_time = null;
+        updates.status = 'registered';
+        updates.current_sequence = 1;
+        updates.time_penalty_minutes = 0;
+        updates.bonus_time_minutes = 0;
+        updates.hints_used = 0;
+        updates.total_paused_duration_seconds = 0;
+        updates.paused_at = null;
+        auditDetails = 'Wiped and reset all progress.';
+      } else if (action === 'mark_completed') {
+        updates.status = 'finished';
+        updates.finish_time = serverTimestamp();
+        auditDetails = 'Forced status completion.';
+      } else if (action === 'bonus_time') {
+        updates.bonus_time_minutes = (teamData.bonus_time_minutes || 0) + (extra.bonus_time_minutes || 0);
+        auditDetails = `Awarded ${extra.bonus_time_minutes} minutes bonus time.`;
+      } else if (action === 'time_penalty') {
+        updates.time_penalty_minutes = (teamData.time_penalty_minutes || 0) + (extra.penalty_minutes || 0);
+        auditDetails = `Applied ${extra.penalty_minutes} minutes penalty.`;
+      } else if (action === 'pause') {
+        updates.status = 'paused';
+        updates.paused_at = serverTimestamp();
+        auditDetails = 'Paused team timer.';
+      } else if (action === 'resume') {
+        const pauseStart = teamData.paused_at ? (teamData.paused_at.toMillis ? teamData.paused_at.toMillis() : teamData.paused_at.seconds * 1000) : Date.now();
+        const pauseDur = Math.floor((Date.now() - pauseStart) / 1000);
+        const prevPause = teamData.total_paused_duration_seconds || 0;
+        updates.status = 'active';
+        updates.paused_at = null;
+        updates.total_paused_duration_seconds = prevPause + pauseDur;
+        auditDetails = 'Resumed team timer.';
+      }
+
+      await updateDoc(teamRef, updates);
+      await logAuditLocal('manual_override', adminEmail, ip, teamData.team_name, auditDetails);
+      
+      const mergedTeamData = { ...teamData, ...updates };
+      if (updates.finish_time === serverTimestamp()) mergedTeamData.finish_time = new Date();
+      if (updates.paused_at === serverTimestamp()) mergedTeamData.paused_at = new Date();
+      await updateLeaderboardDocLocal(teamId, mergedTeamData);
+
       toast.dismiss();
       toast.success('Override applied.');
     } catch (err) {
@@ -268,8 +520,31 @@ export default function AdminDashboard() {
     e.preventDefault();
     try {
       toast.loading('Saving Event config...');
-      const controlFn = httpsCallable(functions, 'controlEvent');
-      await controlFn({ action: 'restore_config', config: eventConfig });
+      
+      const eventRef = doc(db, 'events', 'active_event');
+      const updatedConfig = { ...eventConfig };
+      
+      const dateFields = ['registration_start', 'registration_end', 'event_start', 'event_end'];
+      dateFields.forEach(field => {
+        if (updatedConfig[field]) {
+          if (typeof updatedConfig[field] === 'string') {
+            const date = new Date(updatedConfig[field]);
+            if (!isNaN(date.getTime())) {
+              updatedConfig[field] = Timestamp.fromDate(date);
+            } else {
+              updatedConfig[field] = null;
+            }
+          }
+        } else {
+          updatedConfig[field] = null;
+        }
+      });
+
+      await updateDoc(eventRef, updatedConfig);
+      
+      const adminUser = user?.username || 'admin';
+      await logAuditLocal('restore_config', adminUser, '127.0.0.1', null, 'Imported and restored event configuration.');
+
       toast.dismiss();
       toast.success('Event configuration saved.');
     } catch (err) {
@@ -280,9 +555,9 @@ export default function AdminDashboard() {
 
   const handleBackupDownload = async () => {
     try {
-      const controlFn = httpsCallable(functions, 'controlEvent');
-      const res = await controlFn({ action: 'backup_config' });
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(res.data, null, 2));
+      const eventRef = doc(db, 'events', 'active_event');
+      const snapshot = await getDoc(eventRef);
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(snapshot.data(), null, 2));
       const downloadAnchor = document.createElement('a');
       downloadAnchor.setAttribute("href", dataStr);
       downloadAnchor.setAttribute("download", `aitheron_firebase_backup.json`);
@@ -302,8 +577,29 @@ export default function AdminDashboard() {
     reader.onload = async (event) => {
       try {
         const parsed = JSON.parse(event.target.result);
-        const controlFn = httpsCallable(functions, 'controlEvent');
-        await controlFn({ action: 'restore_config', config: parsed });
+        
+        const eventRef = doc(db, 'events', 'active_event');
+        const updatedConfig = { ...parsed };
+        
+        const dateFields = ['registration_start', 'registration_end', 'event_start', 'event_end'];
+        dateFields.forEach(field => {
+          if (updatedConfig[field]) {
+            if (updatedConfig[field].seconds) {
+              updatedConfig[field] = new Timestamp(updatedConfig[field].seconds, updatedConfig[field].nanoseconds);
+            } else if (typeof updatedConfig[field] === 'string') {
+              const date = new Date(updatedConfig[field]);
+              if (!isNaN(date.getTime())) {
+                updatedConfig[field] = Timestamp.fromDate(date);
+              } else {
+                updatedConfig[field] = null;
+              }
+            }
+          } else {
+            updatedConfig[field] = null;
+          }
+        });
+
+        await updateDoc(eventRef, updatedConfig);
         toast.success('JSON Config restored.');
       } catch (err) {
         toast.error('Invalid configuration file.');
@@ -534,18 +830,41 @@ export default function AdminDashboard() {
         await updateDoc(doc(db, 'teams', teamForm.id), payload);
         toast.success('Team updated.');
       } else {
+        toast.loading('Registering team account...');
         const code = 'T-' + Math.random().toString(36).substring(2, 6).toUpperCase();
-        await addDoc(collection(db, 'teams'), {
-          ...payload,
-          team_code: code,
-          current_sequence: 1,
-          time_penalty_minutes: 0,
-          bonus_time_minutes: 0,
-          hints_used: 0,
-          total_paused_duration_seconds: 0,
-          paused_at: null
-        });
-        toast.success('Team registered.');
+        
+        const secondaryApp = initializeApp(firebaseConfig, 'SecondaryApp');
+        const secondaryAuth = getAuth(secondaryApp);
+        try {
+          const userCred = await createUserWithEmailAndPassword(
+            secondaryAuth,
+            `${code.toLowerCase()}@aitheron.com`,
+            code
+          );
+          
+          await setDoc(doc(db, 'teams', userCred.user.uid), {
+            ...payload,
+            team_code: code,
+            current_sequence: 1,
+            time_penalty_minutes: 0,
+            bonus_time_minutes: 0,
+            hints_used: 0,
+            total_paused_duration_seconds: 0,
+            paused_at: null
+          });
+          
+          toast.dismiss();
+          toast.success(`Team registered successfully. Team Code: ${code}`);
+        } catch (authErr) {
+          toast.dismiss();
+          console.error("Auth creation failed:", authErr);
+          toast.error("Failed to create team authentication account: " + authErr.message);
+          return;
+        } finally {
+          await secondaryAuth.signOut();
+          const { deleteApp } = await import('firebase/app');
+          await deleteApp(secondaryApp);
+        }
       }
       setShowTeamModal(false);
     } catch (err) {

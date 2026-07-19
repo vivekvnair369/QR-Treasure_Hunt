@@ -30,7 +30,39 @@ service cloud.firestore {
     // Teams rules
     match /teams/{teamId} {
       allow read: if request.auth != null && (isAdmin() || request.auth.uid == teamId);
-      allow update: if isTeam(teamId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hints_used']);
+      allow update: if request.auth != null && (
+        isAdmin() || (
+          request.auth.uid == teamId && (
+            // Case 1: Just incrementing hints_used
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hints_used']) 
+            ||
+            // Case 2: Advancing sequence (QR Scan validation)
+            get(/databases/$(database)/documents/events/active_event).data.status == 'running' &&
+            !get(/databases/$(database)/documents/events/active_event).data.scans_locked &&
+            resource.data.status != 'disqualified' &&
+            resource.data.status != 'paused' &&
+            (
+              // Subcase 2a: Starting the event
+              (resource.data.status == 'registered' || resource.data.status == 'checked_in') &&
+              request.resource.data.status == 'active' &&
+              request.resource.data.start_time == request.time &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'start_time'])
+              ||
+              // Subcase 2b: Advancing sequence
+              resource.data.status == 'active' &&
+              request.resource.data.status == 'active' &&
+              request.resource.data.current_sequence == resource.data.current_sequence + 1 &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['current_sequence'])
+              ||
+              // Subcase 2c: Finishing
+              resource.data.status == 'active' &&
+              request.resource.data.status == 'finished' &&
+              request.resource.data.finish_time == request.time &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'finish_time'])
+            )
+          )
+        )
+      );
     }
 
     // Clues rules
@@ -43,9 +75,16 @@ service cloud.firestore {
       );
     }
 
+    // qrCodes rules
+    match /qrCodes/{qrId} {
+      allow get: if request.auth != null;
+      allow list: if isAdmin();
+    }
+
     // Leaderboard rules
     match /leaderboard/{teamId} {
       allow read: if request.auth != null && (isAdmin() || !get(/databases/$(database)/documents/events/active_event).data.leaderboard_hidden);
+      allow write: if request.auth != null && request.auth.uid == teamId;
     }
 
     // scanLogs rules
@@ -53,6 +92,7 @@ service cloud.firestore {
       allow read: if request.auth != null && (
         isAdmin() || resource.data.team_id == request.auth.uid
       );
+      allow create: if request.auth != null && request.resource.data.team_id == request.auth.uid;
     }
     
     // auditLogs rules

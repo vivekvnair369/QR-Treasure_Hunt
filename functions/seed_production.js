@@ -1,47 +1,62 @@
-process.env.FIRESTORE_EMULATOR_HOST = "127.0.0.1:8085";
-process.env.FIREBASE_AUTH_EMULATOR_HOST = "127.0.0.1:9099";
-
 const admin = require("firebase-admin");
+const fs = require("fs");
+const path = require("path");
 
-admin.initializeApp({
-  projectId: "demo-aitheron"
-});
+// 1. Locate and load production service account key
+let serviceAccountPath = null;
+if (fs.existsSync(path.join(__dirname, "service-account.json"))) {
+  serviceAccountPath = path.join(__dirname, "service-account.json");
+} else if (fs.existsSync(path.join(__dirname, "..", "service-account.json"))) {
+  serviceAccountPath = path.join(__dirname, "..", "service-account.json");
+}
+
+if (!process.env.GOOGLE_APPLICATION_CREDENTIALS && !serviceAccountPath) {
+  console.error("\x1b[31mERROR: Firebase production credentials not found.\x1b[0m");
+  console.error("To seed the production database, please do one of the following:");
+  console.error("  1. Download a Service Account private key JSON from Firebase Console > Project Settings > Service Accounts.");
+  console.error("  2. Place it as 'service-account.json' in the root directory or 'functions' directory.");
+  console.error("  3. Alternatively, export GOOGLE_APPLICATION_CREDENTIALS=path/to/key.json\n");
+  process.exit(1);
+}
+
+const config = serviceAccountPath ? { credential: admin.credential.cert(serviceAccountPath) } : {};
+admin.initializeApp(config);
 
 const auth = admin.auth();
 const db = admin.firestore();
 
 async function seed() {
-  console.log("Seeding local Firebase Emulators database...");
+  console.log("Seeding Production Firebase database...");
 
   try {
-    // 1. Create Admin Auth Account
+    // 2. Fetch or Create Admin Auth Account
     let adminUser;
+    const adminEmail = "vivekvnair9037@gmail.com";
     try {
-      adminUser = await auth.createUser({
-        uid: "admin-uid-123",
-        email: "admin@aitheron.com",
-        password: "adminpass",
-        displayName: "Symposium Admin"
-      });
-      console.log("Created Auth admin account: admin@aitheron.com");
+      adminUser = await auth.getUserByEmail(adminEmail);
+      console.log(`Admin Auth account already exists for ${adminEmail} (UID: ${adminUser.uid}).`);
     } catch (e) {
-      if (e.code === 'auth/uid-already-exists' || e.code === 'auth/email-already-exists') {
-        adminUser = await auth.getUserByEmail("admin@aitheron.com");
-        console.log("Admin Auth account already exists.");
+      if (e.code === 'auth/user-not-found') {
+        adminUser = await auth.createUser({
+          email: adminEmail,
+          password: "adminpassword123", // Temporary password, to be reset on first login
+          displayName: "Symposium Coordinator"
+        });
+        console.log(`Created new Auth admin account: ${adminEmail} with temp password.`);
       } else {
         throw e;
       }
     }
 
-    // 2. Create Admin doc in Firestore
+    // 3. Create Admin doc in Firestore
     await db.collection("admins").doc(adminUser.uid).set({
-      email: "admin@aitheron.com",
+      email: adminEmail,
       role: "admin",
-      name: "Symposium Admin"
+      name: "Symposium Coordinator"
     });
-    console.log("Created Firestore admin profile.");
+    console.log(`Created/Updated Firestore admin profile document for admins/${adminUser.uid}.`);
 
-    // 3. Create active event configuration
+    // 4. Create active event configuration
     await db.collection("events").doc("active_event").set({
       name: "AITHERON ML 2026 Treasure Hunt",
       description: "National Level Technical Symposium QR Treasure Hunt Activity.",
@@ -62,7 +77,7 @@ async function seed() {
     });
     console.log("Created active event config.");
 
-    // 4. Seed sample routes
+    // 5. Seed sample routes
     const routes = ["Route A", "Route B", "Route C"];
     const routeIds = [];
     for (const name of routes) {
@@ -72,7 +87,7 @@ async function seed() {
       console.log(`Created route: ${name}`);
     }
 
-    // 5. Seed sample clues & secrets
+    // 6. Seed sample clues & secrets
     const cluesPool = [
       { location_name: 'Library', clue_text: 'I have thousands of sheets but no beds, thousands of stories but no dreams.', answer: 'Library', hint: 'Go to the Central Library' },
       { location_name: 'AI Lab', clue_text: 'Where silicon chips meet artificial minds, and future software takes its designs.', answer: 'AI Lab', hint: 'Computer Science Department' },
@@ -109,7 +124,7 @@ async function seed() {
     }
     console.log("Created clues and QR codes mapping.");
 
-    // 6. Create Test Teams
+    // 7. Create Test Teams
     const sampleTeams = [
       { name: "Cyber Knights", code: "T-CYBER", route: routeIds[0] },
       { name: "Data Wizards", code: "T-DATA", route: routeIds[1] },
@@ -158,14 +173,9 @@ async function seed() {
     }
 
     console.log("\n=================================================");
-    console.log("SUCCESS: Firebase Local Emulator seed complete!");
+    console.log("SUCCESS: Firebase Production database seed complete!");
     console.log("-------------------------------------------------");
-    console.log("ADMIN LOGIN CREDENTIALS:");
-    console.log("Username: admin (or admin@aitheron.com)");
-    console.log("Password: adminpass");
-    console.log("-------------------------------------------------");
-    console.log("SAMPLE TEAM CODE LOGIN:");
-    console.log("Team Code: T-CYBER");
+    console.log(`ADMIN ACCOUNT: ${adminEmail}`);
     console.log("=================================================\n");
 
   } catch (e) {

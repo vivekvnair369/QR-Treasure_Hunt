@@ -1,13 +1,11 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import { 
   signInWithEmailAndPassword, 
-  signInWithCustomToken, 
   onAuthStateChanged, 
   signOut 
 } from 'firebase/auth';
 import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { auth, db, functions } from '../firebase/config';
+import { auth, db } from '../firebase/config';
 
 const AuthContext = createContext(null);
 
@@ -144,14 +142,10 @@ export const AuthProvider = ({ children }) => {
   const teamLogin = async (teamCode) => {
     setLoading(true);
     try {
-      const loginTeamFn = httpsCallable(functions, 'loginTeam');
-      const res = await loginTeamFn({ team_code: teamCode });
-      const { token, team: teamData } = res.data;
-
-      // Log in with Custom Token
-      await signInWithCustomToken(auth, token);
-      // Do not set loading to false here; let onAuthStateChanged handle it on state resolution
-      return { success: true, team: teamData };
+      const email = `${teamCode.trim().toLowerCase()}@aitheron.com`;
+      const password = teamCode.trim().toUpperCase();
+      await signInWithEmailAndPassword(auth, email, password);
+      return { success: true };
     } catch (err) {
       setLoading(false);
       return { success: false, error: mapAuthError(err) };

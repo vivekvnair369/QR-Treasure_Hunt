@@ -35,3 +35,8 @@ ui-debug.log
 *.njsproj
 *.sln
 *.sw?
+
+# Firebase Private Keys
+service-account.json
+service-account*.json
+*.json.key
