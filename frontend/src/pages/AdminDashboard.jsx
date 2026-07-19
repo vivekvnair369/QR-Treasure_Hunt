@@ -18,7 +18,7 @@ import toast from 'react-hot-toast';
 import QRCode from 'qrcode';
 
 export default function AdminDashboard() {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const navigate = useNavigate();
 
   // Tab State
