@@ -5,7 +5,7 @@ import {
   Compass, Camera, AlertCircle, RefreshCw, ArrowLeft, 
   HelpCircle, CheckCircle, Zap, ShieldAlert, Award, Lock, Sparkles
 } from 'lucide-react';
-import { doc, getDoc, addDoc, collection, writeBatch, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, addDoc, collection, writeBatch, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -120,8 +120,11 @@ export default function Scanner() {
       return { status: 'invalid_sequence', message: 'Checkpoint scanned out of order.', clue: { id: qrData.clue_id, ...clueData } };
     }
 
+    const cluesQuerySnap = await getDocs(query(collection(db, 'clues'), where('route_id', '==', teamData.route_id)));
+    const totalClues = cluesQuerySnap.size || 3;
+
     const isFirstClue = currentSeq === 1 && (teamData.status === 'registered' || teamData.status === 'checked_in' || teamData.status === 'waiting');
-    const isLastClue = currentSeq >= eventData.num_clues_per_route;
+    const isLastClue = currentSeq >= totalClues;
 
     const updates = {};
     let statusResult = 'success';
@@ -180,6 +183,16 @@ export default function Scanner() {
       updates.current_sequence = currentSeq + 1;
     }
 
+    // Dynamic progress calculation stored on document
+    const finalSeq = isLastClue ? currentSeq : (updates.current_sequence || currentSeq);
+    const finalStatus = isLastClue ? 'finished' : (updates.status || teamData.status);
+    const completedCluesCount = finalStatus === 'finished' ? totalClues : Math.max(0, finalSeq - 1);
+    const progressPercent = Math.round((completedCluesCount / totalClues) * 100);
+
+    updates.progress_percent = progressPercent;
+    updates.completed_clues = completedCluesCount;
+    updates.total_clues = totalClues;
+
     batch.update(doc(db, 'teams', teamId), updates);
 
     batch.set(doc(collection(db, 'scanLogs')), {
@@ -220,12 +233,15 @@ export default function Scanner() {
       finish_time: isLastClue ? serverTimestamp() : null,
       is_qualifying_winner: updates.is_qualifying_winner !== undefined ? updates.is_qualifying_winner : (teamData.is_qualifying_winner || false),
       is_grand_winner: updates.is_grand_winner !== undefined ? updates.is_grand_winner : (teamData.is_grand_winner || false),
-      route_id: teamData.route_id
+      route_id: teamData.route_id,
+      progress_percent: progressPercent,
+      completed_clues: completedCluesCount,
+      total_clues: totalClues
     }, { merge: true });
 
     await batch.commit();
 
-    return { status: statusResult, clue: { id: qrData.clue_id, ...clueData } };
+    return { status: statusResult, clue: { id: qrData.clue_id, ...clueData, totalClues } };
   };
 
   // Start the QR Scanner
@@ -404,6 +420,14 @@ export default function Scanner() {
     }
   };
 
+  const getScannerProgress = () => {
+    if (!verifiedClue) return { progress: 0, completed: 0, total: 3 };
+    const total = verifiedClue.totalClues || 3;
+    const completed = verifiedClue.sequence || 1;
+    const progress = Math.round((completed / total) * 100);
+    return { progress, completed, total };
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 p-4 md:p-8 flex flex-col items-center justify-center relative text-slate-100 overflow-hidden">
       {/* Glow backgrounds */}
@@ -497,6 +521,23 @@ export default function Scanner() {
               {/* Clue text */}
               <div className="bg-slate-950/60 border border-slate-900 p-5 rounded-2xl italic text-slate-200 font-medium text-base leading-relaxed">
                 "{verifiedClue.clue_text}"
+              </div>
+
+              {/* Progress Bar */}
+              <div className="space-y-2 border-t border-slate-900/60 pt-4">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-semibold text-slate-400">Route Progress</span>
+                  <span className="font-bold text-purple-400">{getScannerProgress().progress}%</span>
+                </div>
+                <div className="w-full bg-slate-950 border border-slate-900 h-2.5 rounded-full overflow-hidden">
+                  <div 
+                    className="bg-gradient-to-r from-purple-500 to-pink-500 h-full rounded-full transition-all duration-500" 
+                    style={{ width: `${getScannerProgress().progress}%` }}
+                  ></div>
+                </div>
+                <p className="text-[10px] text-slate-450 font-bold uppercase tracking-wider mt-1 text-purple-300">
+                  Completed: {getScannerProgress().completed} / {getScannerProgress().total} Clues
+                </p>
               </div>
 
               {/* Hint Box */}

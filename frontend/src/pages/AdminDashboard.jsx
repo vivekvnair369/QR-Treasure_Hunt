@@ -16,13 +16,14 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, connectAuthEmulator } from 'firebase/auth';
 import toast from 'react-hot-toast';
 import QRCode from 'qrcode';
+import confetti from 'canvas-confetti';
 
 export default function AdminDashboard() {
   const { logout, user } = useAuth();
   const navigate = useNavigate();
 
   // Tab State
-  const [activeTab, setActiveTab] = useState('overview'); // overview, teams, routes, clues, event
+  const [activeTab, setActiveTab] = useState('overview'); // overview, teams, routes, clues, event, championship
 
   // Dashboard Lists
   const [teams, setTeams] = useState([]);
@@ -74,6 +75,9 @@ export default function AdminDashboard() {
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [broadcastHintText, setBroadcastHintText] = useState('');
   const [selectedBroadcastRoute, setSelectedBroadcastRoute] = useState('route_a');
+  const [champBroadcastTarget, setChampBroadcastTarget] = useState('all_finalists'); // all_finalists, one_finalist, everyone
+  const [champSelectedFinalistId, setChampSelectedFinalistId] = useState('');
+  const [champBroadcastHintText, setChampBroadcastHintText] = useState('');
 
   const safeTimestampToInputString = (ts) => {
     if (!ts) return '';
@@ -88,6 +92,33 @@ export default function AdminDashboard() {
     }
     return '';
   };
+
+  // Trigger full-screen confetti when a grand champion is declared
+  useEffect(() => {
+    if (eventData?.championship_winner_id) {
+      const duration = 5 * 1000;
+      const animationEnd = Date.now() + duration;
+      const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 100 };
+
+      function randomInRange(min, max) {
+        return Math.random() * (max - min) + min;
+      }
+
+      const interval = setInterval(function() {
+        const timeLeft = animationEnd - Date.now();
+
+        if (timeLeft <= 0) {
+          return clearInterval(interval);
+        }
+
+        const particleCount = 50 * (timeLeft / duration);
+        confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
+        confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
+      }, 250);
+
+      return () => clearInterval(interval);
+    }
+  }, [eventData?.championship_winner_id]);
 
   // 1. Real-time Firestore Subscriptions
   useEffect(() => {
@@ -213,29 +244,34 @@ export default function AdminDashboard() {
 
   const currentStats = getStats();
 
+  const getTeamProgressPercent = (t) => {
+    if (!t) return 0;
+    if (t.status === 'finished' || t.status === 'completed') return 100;
+    const routeClues = clues.filter(c => c.route_id === t.route_id);
+    const total = routeClues.length || 3;
+    const completed = Math.max(0, (t.current_sequence || 1) - 1);
+    return (completed / total) * 100;
+  };
+
   const getSortedLeaderboard = () => {
     const teamList = [...teams];
     const sortKey = (t) => {
+      const progress = getTeamProgressPercent(t);
       const elapsed = calculateElapsedSeconds(t);
-      if (t.route_id === 'championship') {
-        if (t.status === 'finished' || t.is_grand_winner) {
-          return [0, elapsed, t.team_name];
-        }
-        return [1, -(t.current_sequence || 1), elapsed];
-      } else {
-        if (t.is_qualifying_winner || t.status === 'finished') {
-          return [2, elapsed, t.team_name];
-        }
-        if (t.status === 'active') {
-          return [3, -(t.current_sequence || 1), t.start_time?.seconds || 0];
-        }
-        return [4, 0, t.team_name];
+      const isWinner = t.is_grand_winner || t.is_qualifying_winner;
+      
+      if (t.status === 'finished' || isWinner) {
+        return [0, elapsed, t.team_name];
       }
+      if (t.status === 'active') {
+        return [1, -progress, elapsed, t.team_name];
+      }
+      return [2, 0, 0, t.team_name];
     };
     return teamList.sort((a, b) => {
       const ka = sortKey(a);
       const kb = sortKey(b);
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 4; i++) {
         if (ka[i] !== kb[i]) {
           if (typeof ka[i] === 'string') return ka[i].localeCompare(kb[i]);
           return ka[i] - kb[i];
@@ -286,6 +322,12 @@ export default function AdminDashboard() {
       elapsedSeconds = Math.max(0, Math.floor(duration));
     }
 
+    // Calculate dynamic progress percent and counts
+    const routeClues = clues.filter(c => c.route_id === (teamData.route_id || ""));
+    const totalClues = routeClues.length || 3;
+    const completedClues = teamData.status === 'finished' ? totalClues : Math.max(0, (teamData.current_sequence || 1) - 1);
+    const progressPercent = Math.round((completedClues / totalClues) * 100);
+
     await setDoc(doc(db, 'leaderboard', teamId), {
       team_name: teamData.team_name,
       college_name: teamData.college_name || "",
@@ -294,7 +336,10 @@ export default function AdminDashboard() {
       elapsed_seconds: elapsedSeconds,
       hints_used: teamData.hints_used || 0,
       finish_time: teamData.finish_time || null,
-      route_id: teamData.route_id || ""
+      route_id: teamData.route_id || "",
+      progress_percent: progressPercent,
+      completed_clues: completedClues,
+      total_clues: totalClues
     }, { merge: true });
   };
 
@@ -302,6 +347,7 @@ export default function AdminDashboard() {
   const triggerEventAction = async (action, extra = {}) => {
     if (action === 'end' && !window.confirm('Are you sure you want to end the event?')) return;
     if (action === 'soft_reset' && !window.confirm("Are you sure you want to reset the event?\n\nThis will reset all gameplay progress and results, but will NOT delete any teams, routes, clues, QR codes, or authentication accounts.")) return;
+    if (action === 'championship_soft_reset' && !window.confirm("Are you sure you want to reset the Championship? This will clear all finalist progress and reset Round 2, but will NOT affect qualifying round results.")) return;
     if (action === 'full_reset' && !window.confirm('⚠️ WARNING: Full reset wipes routes, clues, scan logs, and teams!')) return;
 
     try {
@@ -426,6 +472,7 @@ export default function AdminDashboard() {
           // Get first clue ID of the route
           const routeClues = clues.filter(c => c.route_id === routeId).sort((a, b) => (a.sequence || 1) - (b.sequence || 1));
           const firstClueId = routeClues.length > 0 ? routeClues[0].id : "";
+          const totalClues = routeClues.length || 3;
 
           batch.update(doc(db, 'teams', t.id), {
             current_sequence: 1,
@@ -446,7 +493,10 @@ export default function AdminDashboard() {
             total_paused_duration_seconds: 0,
             paused_at: null,
             round: 1,
-            route_id: routeId
+            route_id: routeId,
+            progress_percent: 0,
+            completed_clues: 0,
+            total_clues: totalClues
           });
         });
         await batch.commit();
@@ -473,6 +523,8 @@ export default function AdminDashboard() {
           const teamId = docSnap.id;
           const t = teams.find(teamDoc => teamDoc.id === teamId);
           const routeId = t ? (t.original_route_id || t.route_id) : "";
+          const routeClues = clues.filter(c => c.route_id === routeId);
+          const totalClues = routeClues.length || 3;
           batch.update(docSnap.ref, {
             status: 'waiting',
             current_sequence: 1,
@@ -481,7 +533,10 @@ export default function AdminDashboard() {
             finish_time: null,
             is_qualifying_winner: false,
             is_grand_winner: false,
-            route_id: routeId
+            route_id: routeId,
+            progress_percent: 0,
+            completed_clues: 0,
+            total_clues: totalClues
           });
         });
         await batch.commit();
@@ -513,6 +568,74 @@ export default function AdminDashboard() {
           { duration: 5000 }
         );
         await logAuditLocal('event_control', adminUser, ip, null, 'Soft reset completed. All gameplay progress has been cleared.');
+      } else if (action === 'championship_soft_reset') {
+        let batch = writeBatch(db);
+        const finalists = teams.filter(t => t.route_id === 'championship' || t.is_finalist);
+        const champClues = clues.filter(c => c.route_id === 'championship').sort((a, b) => (a.sequence || 1) - (b.sequence || 1));
+        const firstClueId = champClues.length > 0 ? champClues[0].id : "";
+        const totalClues = champClues.length || 3;
+
+        finalists.forEach(t => {
+          batch.update(doc(db, 'teams', t.id), {
+            status: 'active',
+            start_time: serverTimestamp(),
+            current_sequence: 1,
+            completed: false,
+            finish_time: null,
+            finished_at: null,
+            elapsed_time: 0,
+            total_paused_duration_seconds: 0,
+            paused_at: null,
+            is_grand_winner: false,
+            current_clue_id: firstClueId,
+            progress_percent: 0,
+            completed_clues: 0,
+            total_clues: totalClues
+          });
+          
+          batch.update(doc(db, 'leaderboard', t.id), {
+            status: 'active',
+            current_sequence: 1,
+            elapsed_seconds: 0,
+            finish_time: null,
+            is_grand_winner: false,
+            route_id: 'championship',
+            progress_percent: 0,
+            completed_clues: 0,
+            total_clues: totalClues
+          });
+        });
+
+        batch.update(eventRef, {
+          status: 'championship',
+          current_round: 2,
+          event_start: serverTimestamp(),
+          paused_at: null,
+          total_paused_duration_seconds: 0,
+          scans_locked: false,
+          championship_winner_id: "",
+          championship_winner_name: ""
+        });
+
+        await batch.commit();
+
+        const scanLogsSnaps = await getDocs(collection(db, 'scanLogs'));
+        batch = writeBatch(db);
+        let deletedLogsCount = 0;
+        scanLogsSnaps.forEach(logDoc => {
+          const lData = logDoc.data();
+          if (lData.route_id === 'championship' || finalists.some(f => f.id === lData.team_id)) {
+            batch.delete(logDoc.ref);
+            deletedLogsCount++;
+          }
+        });
+        if (deletedLogsCount > 0) {
+          await batch.commit();
+        }
+
+        toast.dismiss();
+        toast.success("Championship progress has been successfully reset!");
+        await logAuditLocal('event_control', adminUser, ip, null, 'Championship Soft Reset completed.');
       } else if (action === 'full_reset') {
         let batch = writeBatch(db);
         const scanLogsSnaps = await getDocs(collection(db, 'scanLogs'));
@@ -602,6 +725,18 @@ export default function AdminDashboard() {
         auditDetails = 'Resumed team timer.';
       }
 
+      // Calculate dynamic progress details based on override updates
+      const finalSeq = updates.status === 'finished' ? teamData.current_sequence : (updates.current_sequence !== undefined ? updates.current_sequence : teamData.current_sequence);
+      const finalStatus = updates.status !== undefined ? updates.status : teamData.status;
+      const routeClues = clues.filter(c => c.route_id === teamData.route_id);
+      const totalClues = routeClues.length || 3;
+      const completedCluesCount = finalStatus === 'finished' ? totalClues : Math.max(0, finalSeq - 1);
+      const progressPercent = Math.round((completedCluesCount / totalClues) * 100);
+
+      updates.progress_percent = progressPercent;
+      updates.completed_clues = completedCluesCount;
+      updates.total_clues = totalClues;
+
       await updateDoc(teamRef, updates);
       await logAuditLocal('manual_override', adminEmail, ip, teamData.team_name, auditDetails);
       
@@ -643,6 +778,9 @@ export default function AdminDashboard() {
       });
       
       // Promote finalists
+      const champClues = clues.filter(c => c.route_id === 'championship');
+      const totalChampClues = champClues.length || 3;
+
       winners.forEach(w => {
         const teamRef = doc(db, 'teams', w.id);
         batch.update(teamRef, {
@@ -655,7 +793,10 @@ export default function AdminDashboard() {
           bonus_time_minutes: 0,
           time_penalty_minutes: 0,
           finish_time: null,
-          is_grand_winner: false
+          is_grand_winner: false,
+          progress_percent: 0,
+          completed_clues: 0,
+          total_clues: totalChampClues
         });
         
         const leaderboardRef = doc(db, 'leaderboard', w.id);
@@ -668,7 +809,10 @@ export default function AdminDashboard() {
           elapsed_seconds: 0,
           hints_used: 0,
           finish_time: null,
-          is_grand_winner: false
+          is_grand_winner: false,
+          progress_percent: 0,
+          completed_clues: 0,
+          total_clues: totalChampClues
         }, { merge: true });
       });
       
@@ -679,6 +823,49 @@ export default function AdminDashboard() {
     } catch (err) {
       toast.dismiss();
       toast.error(err.message || 'Promotion failed.');
+    }
+  };
+
+  const handleChampionshipBroadcast = async (e) => {
+    e.preventDefault();
+    if (!champBroadcastHintText.trim()) {
+      toast.error("Please enter a hint message.");
+      return;
+    }
+    
+    toast.loading("Sending hint broadcast...");
+    try {
+      const batch = writeBatch(db);
+      const adminUser = user?.username || 'admin';
+      
+      if (champBroadcastTarget === 'all_finalists') {
+        const routeRef = doc(db, 'routes', 'championship');
+        batch.update(routeRef, { broadcast_hint: champBroadcastHintText.trim() });
+        await logAuditLocal('broadcast_hint', adminUser, '127.0.0.1', null, `Admin broadcasted hint to all finalists: "${champBroadcastHintText}"`);
+      } else if (champBroadcastTarget === 'one_finalist') {
+        if (!champSelectedFinalistId) {
+          throw new Error("Please select a target finalist.");
+        }
+        const targetTeam = teams.find(t => t.id === champSelectedFinalistId);
+        const teamRef = doc(db, 'teams', champSelectedFinalistId);
+        batch.update(teamRef, { broadcast_hint: champBroadcastHintText.trim() });
+        await logAuditLocal('broadcast_hint', adminUser, '127.0.0.1', targetTeam?.team_name || null, `Admin broadcasted hint to team ${targetTeam?.team_name}: "${champBroadcastHintText}"`);
+      } else if (champBroadcastTarget === 'everyone') {
+        const eventRef = doc(db, 'events', 'active_event');
+        batch.update(eventRef, { broadcast_message: champBroadcastHintText.trim() });
+        routes.forEach(r => {
+          batch.update(doc(db, 'routes', r.id), { broadcast_hint: champBroadcastHintText.trim() });
+        });
+        await logAuditLocal('broadcast_hint', adminUser, '127.0.0.1', null, `Admin broadcasted message to everyone: "${champBroadcastHintText}"`);
+      }
+      
+      await batch.commit();
+      setChampBroadcastHintText('');
+      toast.dismiss();
+      toast.success("Broadcast hint sent successfully!");
+    } catch (err) {
+      toast.dismiss();
+      toast.error(err.message || "Failed to send broadcast hint.");
     }
   };
 
@@ -1419,6 +1606,9 @@ export default function AdminDashboard() {
             <button onClick={() => setActiveTab('event')} className={`flex items-center gap-3 px-4 py-3 rounded-2xl text-xs font-bold transition-all ${activeTab === 'event' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:bg-slate-850'}`}>
               <ShieldAlert className="w-4 h-4" /> Event Control
             </button>
+            <button onClick={() => setActiveTab('championship')} className={`flex items-center gap-3 px-4 py-3 rounded-2xl text-xs font-bold transition-all ${activeTab === 'championship' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:bg-slate-850'}`}>
+              <Trophy className="w-4 h-4" /> Championship Round
+            </button>
           </nav>
         </div>
 
@@ -1590,7 +1780,12 @@ export default function AdminDashboard() {
                             <td className="py-3 font-mono text-slate-400">{team.team_code}</td>
                             <td className="py-3 font-bold text-slate-200">{team.team_name}</td>
                             <td className="py-3 text-slate-400">{getRouteName(team.route_id)}</td>
-                            <td className="py-3 text-slate-400">Clue {team.current_sequence || 1}</td>
+                            <td className="py-3 text-slate-400">
+                              <div>Clue {team.status === 'finished' ? 'Finished' : (team.current_sequence || 1)}</div>
+                              <div className="text-[10px] text-purple-400 font-bold">
+                                {Math.round(getTeamProgressPercent(team))}% ({team.status === 'finished' ? (clues.filter(c => c.route_id === team.route_id).length || 3) : Math.max(0, (team.current_sequence || 1) - 1)} / {clues.filter(c => c.route_id === team.route_id).length || 3})
+                              </div>
+                            </td>
                             <td className="py-3"><span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${team.status === 'finished' ? 'bg-green-500/10 text-green-400' : team.status === 'active' ? 'bg-purple-500/10 text-purple-400' : 'bg-slate-850 text-slate-400'}`}>{team.status}</span></td>
                             <td className="py-3 text-right pr-3 font-mono text-slate-300">{team.status === 'finished' || team.status === 'active' ? `${Math.floor(calculateElapsedSeconds(team)/60)}m ${calculateElapsedSeconds(team)%60}s` : '-'}</td>
                           </tr>
@@ -1667,7 +1862,12 @@ export default function AdminDashboard() {
                             <div className="text-[10px] text-slate-500 mt-0.5">{t.phone}</div>
                           </td>
                           <td className="py-4 px-6 text-slate-300 font-semibold">{getRouteName(t.route_id)}</td>
-                          <td className="py-4 px-6 text-slate-400">Sequence {t.current_sequence || 1}</td>
+                          <td className="py-4 px-6 text-slate-400">
+                            <div>Sequence {t.status === 'finished' ? 'Finished' : (t.current_sequence || 1)}</div>
+                            <div className="text-[10px] text-purple-400 font-bold">
+                              {Math.round(getTeamProgressPercent(t))}% ({t.status === 'finished' ? (clues.filter(c => c.route_id === t.route_id).length || 3) : Math.max(0, (t.current_sequence || 1) - 1)} / {clues.filter(c => c.route_id === t.route_id).length || 3})
+                            </div>
+                          </td>
                           <td className="py-4 px-6"><span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${t.status === 'finished' ? 'bg-green-500/10 text-green-400 border border-green-500/15' : t.status === 'active' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/15' : 'bg-slate-850 text-slate-400'}`}>{t.status}</span></td>
                           <td className="py-4 px-6 text-right">
                             <div className="inline-flex gap-1.5">
@@ -2054,6 +2254,281 @@ export default function AdminDashboard() {
                       </div>
                     ))
                   )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 6: Championship Round Dashboard */}
+          {activeTab === 'championship' && (
+            <div className="space-y-8 animate-fadeIn text-left">
+              {/* Championship Overview Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="glass-card p-6 rounded-3xl border border-yellow-500/20 text-left relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-yellow-500/5 rounded-full blur-xl"></div>
+                  <span className="text-[10px] text-yellow-400 font-black uppercase tracking-wider block">Round Status</span>
+                  <div className="text-2xl font-black mt-2 text-slate-100 uppercase">{eventConfig.status === 'championship' ? '🔥 Finals Active' : eventConfig.status?.replace('_', ' ')}</div>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase mt-1 block">Round: {eventConfig.current_round}</span>
+                </div>
+                
+                <div className="glass-card p-6 rounded-3xl border border-slate-900 text-left">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Championship Finalists</span>
+                  <div className="text-2xl font-extrabold mt-2 text-slate-100">
+                    {teams.filter(t => t.route_id === 'championship' || t.is_finalist).length} / 3
+                  </div>
+                  <span className="text-[10px] text-purple-400 font-bold uppercase mt-1 block">Promoted Block Winners</span>
+                </div>
+
+                <div className="glass-card p-6 rounded-3xl border border-slate-900 text-left">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Finalist Finished</span>
+                  <div className="text-2xl font-extrabold mt-2 text-green-400">
+                    {teams.filter(t => (t.route_id === 'championship' || t.is_finalist) && t.status === 'finished').length}
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase mt-1 block">Finished Route</span>
+                </div>
+
+                <div className="glass-card p-6 rounded-3xl border border-slate-900 text-left">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Championship Winner</span>
+                  <div className="text-lg font-black mt-2 text-yellow-400 truncate">
+                    {eventData?.championship_winner_name ? `🏆 ${eventData.championship_winner_name}` : 'Pending...'}
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase mt-1 block">Grand Champion</span>
+                </div>
+              </div>
+
+              {/* Championship controls & Live progress timeline */}
+              <div className="grid lg:grid-cols-3 gap-8">
+                {/* Controls & Announcements */}
+                <div className="lg:col-span-1 space-y-6">
+                  {/* Controls Card */}
+                  <div className="glass-card p-6 rounded-3xl border border-slate-900 space-y-4">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-200 flex items-center gap-2">
+                      <Settings className="w-4 h-4 text-purple-400" /> Controls Panel
+                    </h3>
+                    
+                    <div className="flex flex-col gap-2">
+                      {eventConfig.status !== 'championship' ? (
+                        <button 
+                          onClick={handleAdvanceToChampionship} 
+                          className="flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-slate-950 text-xs font-black uppercase tracking-wider transition-all shadow-lg hover:shadow-yellow-500/20"
+                        >
+                          <Play className="w-4 h-4" /> Start Championship
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => triggerEventAction('pause')} 
+                          className="flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all"
+                        >
+                          <Pause className="w-4 h-4" /> Pause Championship
+                        </button>
+                      )}
+                      
+                      {eventConfig.status === 'paused' && (
+                        <button 
+                          onClick={() => triggerEventAction('resume')} 
+                          className="flex items-center justify-center gap-2 py-3 rounded-xl bg-green-600 hover:bg-green-500 text-white text-xs font-bold transition-all animate-pulse"
+                        >
+                          <Play className="w-4 h-4" /> Resume Championship
+                        </button>
+                      )}
+
+                      <button 
+                        onClick={() => triggerEventAction('end')} 
+                        disabled={eventConfig.status === 'completed'} 
+                        className="flex items-center justify-center gap-2 py-3 rounded-xl bg-red-600/10 border border-red-500/20 text-red-400 hover:bg-red-650 hover:text-white disabled:opacity-50 text-xs font-bold transition-all"
+                      >
+                        <Square className="w-4 h-4" /> End Championship
+                      </button>
+
+                      <div className="border-t border-slate-900 pt-4 mt-2">
+                        <button 
+                          onClick={() => triggerEventAction('championship_soft_reset')} 
+                          className="w-full py-2.5 rounded-xl bg-yellow-600/10 border border-yellow-500/20 text-yellow-400 hover:bg-yellow-600 hover:text-slate-950 text-xs font-extrabold uppercase transition-all"
+                        >
+                          🔄 Soft Reset Championship Only
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Winner Banner Card */}
+                  {eventData?.championship_winner_id && (
+                    <div className="glass-card p-6 rounded-3xl border border-yellow-500/20 bg-yellow-500/5 text-center space-y-4 animate-bounce relative overflow-hidden">
+                      <Trophy className="w-12 h-12 text-yellow-400 mx-auto filter drop-shadow-[0_0_10px_rgba(234,179,8,0.4)]" />
+                      <div>
+                        <h4 className="text-sm font-black text-yellow-400 uppercase tracking-widest">🏆 Champion Declared</h4>
+                        <p className="text-xl font-extrabold text-white mt-1">{eventData.championship_winner_name}</p>
+                      </div>
+                      <p className="text-[10px] text-slate-400">Winning scans are now disabled.</p>
+                    </div>
+                  )}
+
+                  {/* Broadcast Panel */}
+                  <div className="glass-card p-6 rounded-3xl border border-slate-900">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-200 mb-4 flex items-center gap-2">
+                      📢 Championship Broadcast Panel
+                    </h3>
+                    <form onSubmit={handleChampionshipBroadcast} className="space-y-4">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Recipient Target</label>
+                        <select 
+                          value={champBroadcastTarget} 
+                          onChange={(e) => setChampBroadcastTarget(e.target.value)} 
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-900 text-xs text-slate-300 outline-none rounded-xl"
+                        >
+                          <option value="all_finalists">All Finalists (Round 2)</option>
+                          <option value="one_finalist">Single Finalist (Targeted Clue Hint)</option>
+                          <option value="everyone">Everyone (All 15 Teams)</option>
+                        </select>
+                      </div>
+
+                      {champBroadcastTarget === 'one_finalist' && (
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Select Finalist</label>
+                          <select 
+                            value={champSelectedFinalistId} 
+                            onChange={(e) => setChampSelectedFinalistId(e.target.value)} 
+                            className="w-full px-3 py-2 bg-slate-950 border border-slate-900 text-xs text-slate-300 outline-none rounded-xl"
+                          >
+                            <option value="">-- Choose Team --</option>
+                            {teams.filter(t => t.route_id === 'championship' || t.is_finalist).map(f => (
+                              <option key={f.id} value={f.id}>{f.team_name} ({f.team_code})</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Message</label>
+                        <textarea 
+                          rows="2"
+                          placeholder="Type hint or announcement..."
+                          value={champBroadcastHintText}
+                          onChange={(e) => setChampBroadcastHintText(e.target.value)}
+                          className="w-full px-4 py-2 bg-slate-950 border border-slate-900 text-slate-100 outline-none text-xs focus:border-purple-500 rounded-xl"
+                          required
+                        />
+                      </div>
+
+                      <button 
+                        type="submit" 
+                        className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-purple-500/10"
+                      >
+                        Send Broadcast
+                      </button>
+                    </form>
+                  </div>
+                </div>
+
+                {/* Live Progress Timeline & Finalists standings */}
+                <div className="lg:col-span-2 space-y-6">
+                  {/* Timeline */}
+                  <div className="glass-card p-6 rounded-3xl border border-slate-900 text-left">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-200 mb-4 flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-green-500 animate-ping"></span> Live Finalists Progress Timeline
+                    </h3>
+                    <div className="space-y-5">
+                      {teams.filter(t => t.route_id === 'championship' || t.is_finalist).length === 0 ? (
+                        <p className="text-xs text-slate-500 py-4">No finalists initialized yet.</p>
+                      ) : (
+                        teams.filter(t => t.route_id === 'championship' || t.is_finalist).map((f, i) => {
+                          const routeClues = clues.filter(c => c.route_id === f.route_id);
+                          const total = routeClues.length || 3;
+                          const completed = f.status === 'finished' ? total : Math.max(0, (f.current_sequence || 1) - 1);
+                          const progress = Math.round((completed / total) * 100);
+                          return (
+                            <div key={i} className="space-y-1.5">
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="font-bold text-slate-200">{f.team_name}</span>
+                                <span className="font-mono text-slate-400 font-semibold">{completed} / {total} Clues ({progress}%)</span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <div className="flex-1 bg-slate-950 border border-slate-900 h-3 rounded-full overflow-hidden">
+                                  <div className="bg-gradient-to-r from-purple-500 to-pink-500 h-full rounded-full transition-all duration-500" style={{ width: `${progress}%` }}></div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Finalists Table Cards */}
+                  <div className="glass-card p-6 rounded-3xl border border-slate-900 text-left">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-200 mb-4">
+                      Qualified Finalists Status
+                    </h3>
+                    <div className="grid md:grid-cols-3 gap-4">
+                      {teams.filter(t => t.route_id === 'championship' || t.is_finalist).map((f, idx) => {
+                        const routeClues = clues.filter(c => c.route_id === f.route_id);
+                        const total = routeClues.length || 3;
+                        const completed = f.status === 'finished' ? total : Math.max(0, (f.current_sequence || 1) - 1);
+                        const progress = Math.round((completed / total) * 100);
+                        
+                        let cardBorder = 'border-slate-950 bg-slate-950/20';
+                        let statusColor = 'text-slate-450 bg-slate-900/40';
+                        if (f.status === 'active') { cardBorder = 'border-green-500/25 bg-green-500/5'; statusColor = 'text-green-400 bg-green-500/10'; }
+                        else if (f.status === 'finished') { cardBorder = 'border-blue-500/25 bg-blue-500/5'; statusColor = 'text-blue-400 bg-blue-500/10'; }
+                        else if (f.status === 'waiting') { cardBorder = 'border-amber-500/25 bg-amber-500/5'; statusColor = 'text-amber-400 bg-amber-500/10'; }
+                        else if (f.status === 'eliminated') { cardBorder = 'border-red-500/25 bg-red-500/5'; statusColor = 'text-red-400 bg-red-500/10'; }
+                        
+                        return (
+                          <div key={idx} className={`p-4 rounded-2xl border ${cardBorder} space-y-3 transition-all`}>
+                            <div>
+                              <p className="text-xs font-black text-slate-200 truncate">{f.team_name}</p>
+                              <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">Route: {f.original_route_id?.toUpperCase()?.replace('_', ' ') || 'QUALIFIED'}</p>
+                            </div>
+                            <div className="space-y-1 text-[10px] text-slate-400">
+                              <div>Clue: <span className="font-semibold text-slate-300">{f.status === 'finished' ? 'Finished' : `Clue #${f.current_sequence || 1}`}</span></div>
+                              <div>Progress: <span className="font-semibold text-purple-400">{progress}% Done</span></div>
+                              <div>Duration: <span className="font-semibold text-slate-300 font-mono">{f.status === 'finished' || f.status === 'active' ? `${Math.floor(calculateElapsedSeconds(f)/60)}m ${calculateElapsedSeconds(f)%60}s` : '-'}</span></div>
+                            </div>
+                            <span className={`inline-flex px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${statusColor}`}>
+                              {f.status}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Standings Table */}
+                  <div className="glass-card rounded-3xl border border-slate-900 overflow-hidden text-left">
+                    <div className="px-6 py-4 border-b border-slate-900 flex justify-between items-center">
+                      <h3 className="text-sm font-bold uppercase tracking-wider text-slate-200">
+                        🏆 Championship Live Standings
+                      </h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs text-left">
+                        <thead>
+                          <tr className="bg-slate-900/40 text-[10px] text-slate-500 font-bold uppercase border-b border-slate-900">
+                            <th className="py-3 px-6 text-center">Rank</th>
+                            <th className="py-3 px-6">Team</th>
+                            <th className="py-3 px-6">Current Clue</th>
+                            <th className="py-3 px-6">Progress</th>
+                            <th className="py-3 px-6 text-right">Elapsed Time</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedLeaderboard.filter(t => t.route_id === 'championship').map((team, idx) => (
+                            <tr key={team.id} className="border-b border-slate-900/20 hover:bg-slate-900/10">
+                              <td className="py-3.5 px-6 text-center font-bold text-yellow-400">#{idx + 1}</td>
+                              <td className="py-3.5 px-6 font-bold text-slate-200">{team.team_name}</td>
+                              <td className="py-3.5 px-6 font-mono text-slate-400">{team.status === 'finished' ? 'Finished' : `Clue ${team.current_sequence || 1}`}</td>
+                              <td className="py-3.5 px-6 text-purple-400 font-bold">
+                                {Math.round(getTeamProgressPercent(team))}% ({team.status === 'finished' ? (clues.filter(c => c.route_id === team.route_id).length || 3) : Math.max(0, (team.current_sequence || 1) - 1)} / {clues.filter(c => c.route_id === team.route_id).length || 3})
+                              </td>
+                              <td className="py-3.5 px-6 text-right font-mono text-slate-300 pr-6">
+                                {team.status === 'finished' || team.status === 'active' ? `${Math.floor(calculateElapsedSeconds(team)/60)}m ${calculateElapsedSeconds(team)%60}s` : '-'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

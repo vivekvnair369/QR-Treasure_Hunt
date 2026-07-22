@@ -25,6 +25,12 @@ export default function TeamDashboard() {
   const [routeInfo, setRouteInfo] = useState(null);
   const [finalists, setFinalists] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
+  const [routeCluesCount, setRouteCluesCount] = useState(0);
+  const [showCountdown, setShowCountdown] = useState(false);
+  const [countdownNum, setCountdownNum] = useState(3);
+  const [countdownFinished, setCountdownFinished] = useState(false);
+  const [tempOverrideWaiting, setTempOverrideWaiting] = useState(false);
+  const [allClues, setAllClues] = useState([]);
 
   // Subscribe to Active Event Info
   useEffect(() => {
@@ -34,7 +40,15 @@ export default function TeamDashboard() {
         setEventInfo({ id: snap.docs[0].id, ...ev });
       }
     });
-    return unsubEvent;
+
+    const unsubAllClues = onSnapshot(collection(db, 'clues'), (snap) => {
+      setAllClues(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    return () => {
+      unsubEvent();
+      unsubAllClues();
+    };
   }, []);
 
   // Subscribe to Route info (for broadcast hints and completion status)
@@ -66,31 +80,29 @@ export default function TeamDashboard() {
     return unsubLeaderboard;
   }, [team]);
 
-  // Subscribe to Clue detail
+  // Subscribe to Route Clues (for dynamic count & active clue selection)
   useEffect(() => {
     if (!team || !team.route_id) return;
     
     setLoadingClue(true);
     const q = query(
       collection(db, 'clues'),
-      where('route_id', '==', team.route_id),
-      where('sequence', '==', team.current_sequence || 1),
-      limit(1)
+      where('route_id', '==', team.route_id)
     );
     
-    const unsubClue = onSnapshot(q, (snap) => {
-      if (!snap.empty) {
-        setActiveClue({ id: snap.docs[0].id, ...snap.docs[0].data() });
-      } else {
-        setActiveClue(null);
-      }
+    const unsubClues = onSnapshot(q, (snap) => {
+      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setRouteCluesCount(list.length);
+      
+      const active = list.find(c => c.sequence === (team.current_sequence || 1));
+      setActiveClue(active || null);
       setLoadingClue(false);
     }, (err) => {
-      console.error("Clue subscription error:", err);
+      console.error("Clues subscription error:", err);
       setLoadingClue(false);
     });
 
-    return unsubClue;
+    return unsubClues;
   }, [team?.route_id, team?.current_sequence]);
 
   const handleShowHint = async () => {
@@ -166,7 +178,7 @@ export default function TeamDashboard() {
   const getProgress = () => {
     if (!team) return 0;
     if (team.status === 'completed' || team.status === 'finished') return 100;
-    const total = eventInfo?.num_clues_per_route || 4;
+    const total = routeCluesCount || 3;
     const current = team.current_sequence || 1;
     return Math.round(((current - 1) / total) * 100);
   };
@@ -244,22 +256,33 @@ export default function TeamDashboard() {
   const getTeamRank = () => {
     if (leaderboard.length === 0 || !team) return '-';
     
+    const getProgress = (t) => {
+      if (t.status === 'finished' || t.status === 'completed') return 100;
+      const routeClues = allClues.filter(c => c.route_id === t.route_id);
+      const total = routeClues.length || 3;
+      const completed = Math.max(0, (t.current_sequence || 1) - 1);
+      return (completed / total) * 100;
+    };
+
     // Sort leaderboard using same criteria as Leaderboard.jsx
     const sorted = [...leaderboard].sort((a, b) => {
       const sortKey = (t) => {
+        const progress = getProgress(t);
         const elapsed = t.elapsed_seconds || 0;
-        if (t.route_id === 'championship') {
-          if (t.status === 'finished' || t.is_grand_winner) return [0, elapsed, t.team_name];
-          return [1, -(t.current_sequence || 1), elapsed];
-        } else {
-          if (t.is_qualifying_winner || t.status === 'finished') return [2, elapsed, t.team_name];
-          if (t.status === 'active') return [3, -(t.current_sequence || 1), elapsed];
-          return [4, 0, t.team_name];
+        const isWinner = t.is_grand_winner || t.is_qualifying_winner;
+        
+        if (t.status === 'finished' || isWinner) {
+          return [0, elapsed, t.team_name];
         }
+        if (t.status === 'active') {
+          return [1, -progress, elapsed, t.team_name];
+        }
+        return [2, 0, 0, t.team_name];
       };
+      
       const ka = sortKey(a);
       const kb = sortKey(b);
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 4; i++) {
         if (ka[i] !== kb[i]) {
           if (typeof ka[i] === 'string') return ka[i].localeCompare(kb[i]);
           return ka[i] - kb[i];
@@ -314,11 +337,75 @@ export default function TeamDashboard() {
     }
   }, [team?.status, eventInfo?.status, team?.is_qualifying_winner, team?.is_grand_winner]);
 
+  // Trigger transition countdown when moving to a final result screen
+  useEffect(() => {
+    if (stateCase === 'loading') return;
+
+    const nonFinalCases = ['loading', 'pre_event', 'playing', 'not_started', 'championship_playing'];
+    
+    // Reset countdown states if we are back in playing/active state
+    if (nonFinalCases.includes(stateCase)) {
+      setCountdownFinished(false);
+      setTempOverrideWaiting(false);
+      return;
+    }
+
+    // Trigger full screen 3-2-1-0 countdown if final state reached and hasn't run
+    if (!countdownFinished && !showCountdown) {
+      setShowCountdown(true);
+      setCountdownNum(3);
+    }
+  }, [stateCase, countdownFinished]);
+
+  // Countdown timer sequence
+  useEffect(() => {
+    if (!showCountdown) return;
+
+    const interval = setInterval(() => {
+      setCountdownNum((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          setTimeout(() => {
+            setShowCountdown(false);
+            setCountdownFinished(true);
+          }, 1000);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [showCountdown]);
+
+  // Auto transition from Qualified Winner to Waiting for Championship screen after 4s
+  useEffect(() => {
+    if (stateCase === 'qualified_winner' && countdownFinished && !tempOverrideWaiting) {
+      const timer = setTimeout(() => {
+        setTempOverrideWaiting(true);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [stateCase, countdownFinished, tempOverrideWaiting]);
+
   const stateCase = getTeamStateCase();
 
   return (
     <div className="min-h-screen bg-slate-950 p-4 md:p-8 relative">
       <div className="absolute top-10 left-10 w-96 h-96 rounded-full glow-purple opacity-20 pointer-events-none"></div>
+
+      {/* 3-2-1-0 Transition Countdown Overlay */}
+      {showCountdown && (
+        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex flex-col items-center justify-center select-none animate-fadeIn">
+          <div className="text-center space-y-6">
+            <p className="text-purple-400 text-xs font-bold uppercase tracking-[0.2em] animate-pulse">Synchronizing Results</p>
+            <div key={countdownNum} className="text-9xl font-black text-white drop-shadow-[0_0_40px_rgba(168,85,247,0.55)] animate-countdownZoom">
+              {countdownNum}
+            </div>
+            <p className="text-slate-500 text-[10px] font-bold tracking-wider uppercase">Standby for placement...</p>
+          </div>
+        </div>
+      )}
       
       <div className="max-w-4xl mx-auto z-10 relative">
         {/* Header */}
@@ -360,21 +447,21 @@ export default function TeamDashboard() {
         )}
 
         {/* CASE 1: qualified_winner */}
-        {stateCase === 'qualified_winner' && (
+        {stateCase === 'qualified_winner' && countdownFinished && !tempOverrideWaiting && (
           <div className="w-full glass-card p-10 rounded-3xl border border-yellow-500/20 shadow-2xl text-center space-y-6 animate-scaleUp">
             <div className="inline-flex p-5 rounded-full bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 mb-2 animate-bounce">
               <Award className="w-16 h-16" />
             </div>
             
-            <h2 className="text-3xl font-extrabold text-slate-100">🏆 Congratulations!</h2>
+            <h2 className="text-3xl font-extrabold text-slate-100">🎉 Congratulations!</h2>
             <p className="text-slate-300 text-sm max-w-md mx-auto leading-relaxed">
-              You are the Winner of your qualifying route.
+              You are the winner of your qualifying route.
             </p>
-            <p className="text-slate-200 text-sm font-bold max-w-sm mx-auto">
+            <p className="text-slate-255 text-sm font-bold max-w-sm mx-auto">
               You have successfully qualified for the Championship Round.
             </p>
             <p className="text-slate-400 text-xs max-w-sm mx-auto italic">
-              Please wait until the coordinator starts the final round.
+              Please wait while the coordinator prepares the next round.
             </p>
 
             <div className="flex justify-center gap-2">
@@ -404,19 +491,19 @@ export default function TeamDashboard() {
         )}
 
         {/* CASE 2: eliminated_spectator */}
-        {stateCase === 'eliminated_spectator' && (
-          <div className="space-y-6">
-            <div className="w-full glass-card p-8 rounded-3xl border border-slate-900 shadow-2xl text-center space-y-6 animate-scaleUp">
+        {stateCase === 'eliminated_spectator' && countdownFinished && (
+          <div className="space-y-6 animate-scaleUp">
+            <div className="w-full glass-card p-8 rounded-3xl border border-slate-900 shadow-2xl text-center space-y-6">
               <div className="inline-flex p-4 bg-red-500/10 border border-red-500/20 rounded-full text-red-400 mb-2">
                 <XCircle className="w-12 h-12" />
               </div>
               
               <h2 className="text-2xl font-bold text-slate-200">Thank You for Participating!</h2>
               <p className="text-slate-400 text-sm max-w-md mx-auto leading-relaxed">
-                The qualifying round has ended. Another team completed your route first.
+                The qualifying round has ended. Unfortunately another team completed your route first.
               </p>
               <p className="text-slate-500 text-xs italic">
-                Unfortunately your journey ends here.
+                Status: <span className="text-red-400 font-bold">❌ Eliminated</span>
               </p>
 
               <div className="flex justify-center gap-2">
@@ -436,7 +523,7 @@ export default function TeamDashboard() {
                   }}
                   className="flex-1 py-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold transition-all text-xs"
                 >
-                  Watch Championship Progress
+                  Watch Championship
                 </button>
                 <button 
                   onClick={() => navigate('/leaderboard')}
@@ -448,29 +535,46 @@ export default function TeamDashboard() {
             </div>
 
             {/* Live progress section */}
-            <div id="live-spectator-progress" className="w-full glass-card p-6 rounded-3xl border border-slate-900 text-left">
-              <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest mb-4 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-ping"></span> Live Finalists Progress
+            <div id="live-spectator-progress" className="w-full glass-card p-6 rounded-3xl border border-slate-900 text-left space-y-4">
+              <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest mb-2 flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-green-500 animate-ping"></span> Live Finalists Progress
               </h3>
-              <div className="space-y-4">
+              <div className="space-y-5">
                 {finalists.length === 0 ? (
-                  <p className="text-xs text-slate-500">Waiting for finalists to initialize...</p>
+                  <p className="text-xs text-slate-500 py-2">Waiting for finalists to initialize...</p>
                 ) : (
-                  finalists.map((f, i) => (
-                    <div key={i} className="flex justify-between items-center border-b border-slate-900/60 pb-3.5 last:border-0 last:pb-0">
-                      <div>
-                        <p className="text-sm font-bold text-slate-200">{f.team_name}</p>
-                        <p className="text-[10px] text-slate-500 uppercase tracking-wider">{f.college_name || 'Symposium Finalist'}</p>
+                  finalists.map((f, i) => {
+                    // Group clues to calculate progress % dynamically
+                    const routeClues = allClues.filter(c => c.route_id === f.route_id);
+                    const total = routeClues.length || 3;
+                    const completed = f.status === 'finished' ? total : Math.max(0, (f.current_sequence || 1) - 1);
+                    const progress = Math.round((completed / total) * 100);
+                    return (
+                      <div key={i} className="space-y-2 border-b border-slate-900/60 pb-4 last:border-0 last:pb-0">
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <p className="text-sm font-bold text-slate-200">{f.team_name}</p>
+                            <p className="text-[10px] text-slate-500 uppercase tracking-wider">{f.college_name || 'Symposium Finalist'}</p>
+                          </div>
+                          <div className="text-right">
+                            <span className={`px-2.5 py-0.5 rounded text-[10px] font-black uppercase ${
+                              f.status === 'finished' ? 'bg-green-500/10 text-green-400 border border-green-500/25 animate-pulse' : 'bg-purple-500/10 text-purple-400 border border-purple-500/25'
+                            }`}>
+                              {f.status === 'finished' ? '🏆 Winner' : `Clue #${f.current_sequence || 1}`}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        {/* Progress Bar */}
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1 bg-slate-950 border border-slate-900 h-2.5 rounded-full overflow-hidden">
+                            <div className="bg-gradient-to-r from-purple-500 to-pink-500 h-full rounded-full transition-all duration-500" style={{ width: `${progress}%` }}></div>
+                          </div>
+                          <span className="text-xs font-mono font-bold text-slate-400">{progress}% ({completed}/{total})</span>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                          f.status === 'finished' ? 'bg-green-500/10 text-green-400 border border-green-500/25' : 'bg-purple-500/10 text-purple-400 border border-purple-500/25'
-                        }`}>
-                          {f.status === 'finished' ? '🏆 Winner' : `Clue #${f.current_sequence || 1}`}
-                        </span>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -478,16 +582,30 @@ export default function TeamDashboard() {
         )}
 
         {/* CASE 3: waiting_championship */}
-        {stateCase === 'waiting_championship' && (
+        {(stateCase === 'waiting_championship' || (stateCase === 'qualified_winner' && tempOverrideWaiting)) && (
           <div className="w-full glass-card p-10 rounded-3xl border border-purple-500/20 shadow-2xl text-center space-y-6 animate-scaleUp">
             <div className="inline-flex p-5 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-400 mb-2">
               <RefreshCw className="w-16 h-16 animate-spin text-purple-500" />
             </div>
             
-            <h2 className="text-3xl font-extrabold text-slate-100">✅ You Qualified!</h2>
+            <h2 className="text-3xl font-extrabold text-slate-100">🏆 Championship Round</h2>
             <p className="text-slate-300 text-sm max-w-md mx-auto leading-relaxed">
-              Please wait while the coordinator prepares the Championship Round. The final battle will begin shortly.
+              You have qualified for the Championship.
             </p>
+            <p className="text-slate-400 text-xs max-w-md mx-auto italic font-bold">
+              The next round will begin shortly. Waiting for the coordinator...
+            </p>
+
+            {/* Live Announcements */}
+            {eventInfo?.broadcast_message && (
+              <div className="max-w-md mx-auto p-4 rounded-2xl bg-purple-950/40 border border-purple-500/30 text-purple-200 text-sm font-semibold flex items-start gap-3 shadow-lg shadow-purple-500/5 animate-pulse text-left">
+                <span className="text-lg">📢</span>
+                <div>
+                  <p className="text-[9px] text-purple-400 font-bold uppercase tracking-widest mb-0.5">Announcement</p>
+                  <p className="italic text-slate-200 font-medium">"{eventInfo.broadcast_message}"</p>
+                </div>
+              </div>
+            )}
 
             <div className="max-w-md mx-auto p-4 bg-slate-950/60 border border-slate-900 rounded-2xl flex flex-col items-center gap-2">
               <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Live Status</span>
@@ -496,14 +614,14 @@ export default function TeamDashboard() {
 
             {eventInfo?.countdown_timer_active && (
               <div className="my-2 text-slate-400 text-xs">
-                Global Timer: <span className="font-mono font-bold text-slate-200">{countdownText}</span>
+                Global Countdown: <span className="font-mono font-bold text-slate-200">{countdownText}</span>
               </div>
             )}
           </div>
         )}
 
         {/* CASE 5: grand_champion */}
-        {stateCase === 'grand_champion' && (
+        {stateCase === 'grand_champion' && countdownFinished && (
           <div className="w-full glass-card p-10 rounded-3xl border border-yellow-500/30 shadow-2xl text-center space-y-6 animate-scaleUp">
             <div className="inline-flex p-5 rounded-full bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 mb-2 animate-bounce">
               <Trophy className="w-20 h-20 text-yellow-400 filter drop-shadow-[0_0_15px_rgba(234,179,8,0.3)]" />
@@ -513,7 +631,7 @@ export default function TeamDashboard() {
               🏆 GRAND CHAMPION
             </h1>
             <p className="text-slate-200 text-base max-w-md mx-auto leading-relaxed">
-              Congratulations! Your team has won the Treasure Hunt Championship.
+              Congratulations! You are the Treasure Hunt Champion.
             </p>
             <p className="text-slate-400 text-sm italic">
               Thank you for participating. You conquered the final round!
@@ -522,7 +640,7 @@ export default function TeamDashboard() {
             <div className="grid grid-cols-2 gap-4 max-w-md mx-auto text-left pt-2">
               <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-4">
                 <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Final Rank</span>
-                <span className="text-lg font-black text-yellow-400">🥇 #1 Champion</span>
+                <span className="text-lg font-black text-yellow-400">🏆 Rank #1 Champion</span>
               </div>
               <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-4">
                 <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Completion Time</span>
@@ -556,18 +674,18 @@ export default function TeamDashboard() {
         )}
 
         {/* CASE 6: championship_finalist_completed */}
-        {stateCase === 'championship_finalist_completed' && (
+        {stateCase === 'championship_finalist_completed' && countdownFinished && (
           <div className="w-full glass-card p-10 rounded-3xl border border-slate-800 shadow-2xl text-center space-y-6 animate-scaleUp">
             <div className="inline-flex p-5 rounded-full bg-slate-800 border border-slate-700 text-slate-400 mb-2">
               <Award className="w-16 h-16 text-slate-300" />
             </div>
             
-            <h2 className="text-3xl font-bold text-slate-200">Championship Completed</h2>
+            <h2 className="text-3xl font-bold text-slate-200">🥈 Congratulations!</h2>
             <p className="text-slate-400 text-sm max-w-md mx-auto leading-relaxed">
-              Congratulations! Your team successfully reached and completed the Championship Finals.
+              You reached the Championship Final.
             </p>
             <p className="text-slate-500 text-xs italic">
-              Thank you for competing. You are one of the top finalists of the symposium.
+              Thank you for participating.
             </p>
 
             <div className="grid grid-cols-2 gap-4 max-w-md mx-auto text-left pt-2">
@@ -576,7 +694,7 @@ export default function TeamDashboard() {
                 <span className="text-lg font-bold text-slate-200 font-mono">{getTeamRank()}</span>
               </div>
               <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-4">
-                <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Final Time</span>
+                <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Completion Time</span>
                 <span className="text-lg font-bold text-slate-200 font-mono">
                   {team ? formatDuration(team.start_time, team.finish_time) : '-'}
                 </span>
@@ -601,18 +719,18 @@ export default function TeamDashboard() {
         )}
 
         {/* CASE 7: timeout */}
-        {stateCase === 'timeout' && (
+        {stateCase === 'timeout' && countdownFinished && (
           <div className="w-full glass-card p-10 rounded-3xl border border-red-500/20 shadow-2xl text-center space-y-6 animate-scaleUp">
-            <div className="inline-flex p-4 bg-red-500/10 border border-red-500/20 rounded-full inline-flex text-red-400 mb-2">
+            <div className="inline-flex p-4 bg-red-500/10 border border-red-500/20 rounded-full text-red-400 mb-2">
               <Clock className="w-14 h-14 text-red-400 animate-pulse" />
             </div>
             
             <h2 className="text-3xl font-extrabold text-slate-200">⏰ Time's Up!</h2>
-            <p className="text-slate-300 text-sm max-w-md mx-auto leading-relaxed">
-              The Treasure Hunt has ended. No further QR scans will be accepted.
+            <p className="text-slate-300 text-sm max-w-md mx-auto leading-relaxed font-bold">
+              The event has ended.
             </p>
-            <p className="text-slate-400 text-xs italic">
-              Please proceed to the event stage for the final announcements.
+            <p className="text-slate-400 text-xs max-w-md mx-auto leading-relaxed">
+              No further scans are accepted. Please proceed to the event stage.
             </p>
 
             <div className="inline-flex px-3 py-1 rounded-full text-xs font-bold bg-red-500/10 text-red-400 border border-red-500/20 animate-pulse">
@@ -631,7 +749,7 @@ export default function TeamDashboard() {
         )}
 
         {/* CASE 8: completed_result */}
-        {stateCase === 'completed_result' && (
+        {stateCase === 'completed_result' && countdownFinished && (
           <div className="w-full glass-card p-10 rounded-3xl border border-slate-850 shadow-2xl text-center space-y-6 animate-scaleUp">
             <div className="inline-flex p-4 bg-purple-500/10 border border-purple-500/20 rounded-full inline-flex text-purple-400 mb-2">
               <Award className="w-14 h-14 text-purple-400" />
@@ -656,20 +774,20 @@ export default function TeamDashboard() {
                 </span>
               </div>
               <div className="flex justify-between items-center border-b border-slate-900 pb-2">
-                <span className="text-xs text-slate-500 font-medium">Final Rank</span>
+                <span className="text-xs text-slate-500 font-medium">Final Position</span>
                 <span className="text-sm font-black text-purple-400">{getTeamRank()}</span>
               </div>
               <div className="flex justify-between items-center pt-2">
                 <span className="text-xs text-slate-500 font-medium">Result Badge</span>
                 <span>
                   {team?.is_grand_winner ? (
-                    <span className="px-2.5 py-0.5 rounded text-[9px] font-black uppercase bg-yellow-500/10 text-yellow-400 border border-yellow-500/25">🥇 Champion</span>
+                    <span className="px-2.5 py-0.5 rounded text-[9px] font-black bg-gradient-to-r from-yellow-500 to-amber-500 text-slate-950 uppercase border border-yellow-500/25">🥇 Champion</span>
                   ) : team?.route_id === 'championship' ? (
                     <span className="px-2.5 py-0.5 rounded text-[9px] font-black uppercase bg-slate-800 text-slate-300 border border-slate-700">🥈 Finalist</span>
                   ) : team?.is_qualifying_winner ? (
                     <span className="px-2.5 py-0.5 rounded text-[9px] font-black uppercase bg-green-500/10 text-green-400 border border-green-500/25">🏆 Qualified</span>
-                  ) : team?.status === 'finished' ? (
-                    <span className="px-2.5 py-0.5 rounded text-[9px] font-black uppercase bg-blue-500/10 text-blue-400 border border-blue-500/25">🏁 Finished</span>
+                  ) : eventInfo?.timeout ? (
+                    <span className="px-2.5 py-0.5 rounded text-[9px] font-black uppercase bg-red-500/10 text-red-400 border border-red-500/25">⏰ Timed Out</span>
                   ) : (
                     <span className="px-2.5 py-0.5 rounded text-[9px] font-black uppercase bg-red-500/10 text-red-400 border border-red-500/25">❌ Eliminated</span>
                   )}
@@ -742,15 +860,15 @@ export default function TeamDashboard() {
                     <span className="text-sm font-bold text-slate-300">Route Progress</span>
                     <span className="text-sm font-semibold text-purple-400">{getProgress()}%</span>
                   </div>
-                  <div className="w-full bg-slate-900 border border-slate-800 h-2 rounded-full overflow-hidden">
+                  <div className="w-full bg-slate-900 border border-slate-800 h-2.5 rounded-full overflow-hidden mb-2">
                     <div 
                       className="bg-gradient-to-r from-purple-500 to-pink-500 h-full rounded-full transition-all duration-500" 
                       style={{ width: `${getProgress()}%` }}
                     ></div>
                   </div>
                 </div>
-                <p className="text-xs text-slate-400">
-                  Clue {team?.current_sequence || 1}
+                <p className="text-xs text-slate-400 font-bold text-purple-300 uppercase tracking-wider">
+                  Completed: {team?.status === 'finished' ? routeCluesCount : Math.max(0, (team?.current_sequence || 1) - 1)} / {routeCluesCount} Clues
                 </p>
               </div>
             </div>
@@ -807,12 +925,12 @@ export default function TeamDashboard() {
                 </div>
               ) : activeClue ? (
                 <div>
-                  {routeInfo?.broadcast_hint && (
+                  {(routeInfo?.broadcast_hint || team?.broadcast_hint) && (
                     <div className="mb-6 p-4 rounded-2xl bg-purple-950/40 border border-purple-500/30 text-purple-200 text-sm font-semibold flex items-start gap-3 shadow-lg shadow-purple-500/5 animate-pulse">
                       <span className="text-lg">📢</span>
                       <div className="text-left">
                         <p className="text-[9px] text-purple-400 font-bold uppercase tracking-widest mb-0.5">ADMIN BROADCAST HINT</p>
-                        <p className="italic text-slate-200 font-medium">"{routeInfo.broadcast_hint}"</p>
+                        <p className="italic text-slate-200 font-medium">"{team?.broadcast_hint || routeInfo.broadcast_hint}"</p>
                       </div>
                     </div>
                   )}

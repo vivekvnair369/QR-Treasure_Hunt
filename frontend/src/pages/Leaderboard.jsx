@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 export default function Leaderboard() {
   const navigate = useNavigate();
   const [standings, setStandings] = useState([]);
+  const [clues, setClues] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -22,7 +23,14 @@ export default function Leaderboard() {
       setLoading(false);
     });
 
-    return () => unsub();
+    const unsubClues = onSnapshot(collection(db, 'clues'), (snap) => {
+      setClues(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    return () => {
+      unsub();
+      unsubClues();
+    };
   }, []);
 
   const formatMinutes = (seconds) => {
@@ -32,18 +40,42 @@ export default function Leaderboard() {
     return `${mins}m ${secs}s`;
   };
 
+  const getProgressDetails = (t) => {
+    if (!t) return { percent: 0, completed: 0, total: 3 };
+    const routeClues = clues.filter(c => c.route_id === t.route_id);
+    const total = routeClues.length || 3;
+    const completed = t.status === 'finished' ? total : Math.max(0, (t.current_sequence || 1) - 1);
+    return {
+      percent: Math.round((completed / total) * 100),
+      completed,
+      total
+    };
+  };
+
+  const getTeamProgressPercent = (t) => {
+    return getProgressDetails(t).percent;
+  };
+
   const sortTeams = (list) => {
     const sortKey = (t) => {
-      // Prioritize completed teams
-      if (t.status === 'finished') return [0, t.elapsed_seconds || 0, t.team_name];
-      if (t.status === 'active') return [1, -(t.current_sequence || 1), t.team_name];
-      return [2, 0, t.team_name];
+      const progress = getTeamProgressPercent(t);
+      const elapsed = t.elapsed_seconds || 0;
+      
+      const isWinner = t.is_grand_winner || t.is_qualifying_winner;
+      
+      if (t.status === 'finished' || isWinner) {
+        return [0, elapsed, t.team_name];
+      }
+      if (t.status === 'active') {
+        return [1, -progress, elapsed, t.team_name];
+      }
+      return [2, 0, 0, t.team_name];
     };
     
     return [...list].sort((a, b) => {
       const ka = sortKey(a);
       const kb = sortKey(b);
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 4; i++) {
         if (ka[i] !== kb[i]) {
           if (typeof ka[i] === 'string') return ka[i].localeCompare(kb[i]);
           return ka[i] - kb[i];
@@ -143,8 +175,13 @@ export default function Leaderboard() {
                                   )}
                                 </div>
                               </td>
-                              <td className="py-5 px-6 text-slate-300 font-medium">
-                                {team.status === 'finished' ? 'Completed Route!' : `Clue ${team.current_sequence || 1}`}
+                              <td className="py-5 px-6 text-left">
+                                <div className="text-slate-300 font-medium flex flex-col">
+                                  <span>{team.status === 'finished' ? 'Completed Route!' : `Clue ${team.current_sequence || 1}`}</span>
+                                  <span className="text-[10px] text-yellow-500 font-bold">
+                                    {getProgressDetails(team).percent}% Completed ({getProgressDetails(team).completed}/{getProgressDetails(team).total} Clues)
+                                  </span>
+                                </div>
                               </td>
                               <td className="py-5 px-6 font-mono text-slate-400">
                                 {team.hints_used || 0} hint(s)
@@ -209,8 +246,13 @@ export default function Leaderboard() {
                             <td className="py-5 px-6 text-slate-400 font-semibold uppercase text-xs">
                               {team.route_id === 'route_a' ? 'Block A' : team.route_id === 'route_b' ? 'Block B' : team.route_id === 'route_c' ? 'Block C' : 'Qualifying'}
                             </td>
-                            <td className="py-5 px-6 text-slate-300 font-medium">
-                              {team.status === 'finished' ? 'Completed Route' : `Clue ${team.current_sequence || 1}`}
+                            <td className="py-5 px-6 text-left">
+                              <div className="text-slate-300 font-medium flex flex-col font-medium">
+                                <span>{team.status === 'finished' ? 'Completed Route' : `Clue ${team.current_sequence || 1}`}</span>
+                                <span className="text-[10px] text-purple-400 font-bold">
+                                  {getProgressDetails(team).percent}% Completed ({getProgressDetails(team).completed}/{getProgressDetails(team).total} Clues)
+                                </span>
+                              </div>
                             </td>
                             <td className="py-5 px-6 text-right font-mono font-bold text-slate-200">
                               {team.status === 'finished' || team.status === 'active' ? formatMinutes(team.elapsed_seconds) : '-'}
