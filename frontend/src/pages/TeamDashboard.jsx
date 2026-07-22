@@ -103,13 +103,16 @@ export default function TeamDashboard() {
   // Real-time Broadcast Visibility & Auto-hide Timer
   useEffect(() => {
     // 1. Route Broadcast Check
-    const activeHint = team?.broadcast_hint || routeInfo?.broadcast_hint;
-    const isAutoHide = team?.broadcast_hint
-      ? team?.broadcast_hint_auto_hide
-      : routeInfo?.broadcast_hint_auto_hide;
-    const hideAt = team?.broadcast_hint
-      ? team?.broadcast_hint_hide_at
-      : routeInfo?.broadcast_hint_hide_at;
+    const activeHint = team?.broadcast_hint || team?.broadcast_message || team?.current_hint || 
+                       routeInfo?.broadcast_hint || routeInfo?.broadcast_message || routeInfo?.current_hint;
+                       
+    const isAutoHide = (team?.broadcast_hint || team?.broadcast_message || team?.current_hint)
+      ? (team?.broadcast_hint_auto_hide || team?.broadcast_message_auto_hide)
+      : (routeInfo?.broadcast_hint_auto_hide || routeInfo?.broadcast_message_auto_hide);
+      
+    const hideAt = (team?.broadcast_hint || team?.broadcast_message || team?.current_hint)
+      ? (team?.broadcast_hint_hide_at || team?.broadcast_message_hide_at)
+      : (routeInfo?.broadcast_hint_hide_at || routeInfo?.broadcast_message_hide_at);
 
     let routeTimeoutId = null;
 
@@ -137,9 +140,9 @@ export default function TeamDashboard() {
     }
 
     // 2. Global Event Broadcast Check
-    const activeMsg = eventInfo?.broadcast_message;
-    const isGlobalAutoHide = eventInfo?.broadcast_message_auto_hide;
-    const globalHideAt = eventInfo?.broadcast_message_hide_at;
+    const activeMsg = eventInfo?.broadcast_message || eventInfo?.broadcast_hint || eventInfo?.current_hint;
+    const isGlobalAutoHide = eventInfo?.broadcast_message_auto_hide || eventInfo?.broadcast_hint_auto_hide;
+    const globalHideAt = eventInfo?.broadcast_message_hide_at || eventInfo?.broadcast_hint_hide_at;
 
     let globalTimeoutId = null;
 
@@ -170,7 +173,17 @@ export default function TeamDashboard() {
       if (routeTimeoutId) clearTimeout(routeTimeoutId);
       if (globalTimeoutId) clearTimeout(globalTimeoutId);
     };
-  }, [team?.broadcast_hint, team?.broadcast_hint_auto_hide, team?.broadcast_hint_hide_at, routeInfo?.broadcast_hint, routeInfo?.broadcast_hint_auto_hide, routeInfo?.broadcast_hint_hide_at, eventInfo?.broadcast_message, eventInfo?.broadcast_message_auto_hide, eventInfo?.broadcast_message_hide_at]);
+  }, [
+    team?.broadcast_hint, team?.broadcast_message, team?.current_hint, 
+    team?.broadcast_hint_auto_hide, team?.broadcast_message_auto_hide, 
+    team?.broadcast_hint_hide_at, team?.broadcast_message_hide_at,
+    routeInfo?.broadcast_hint, routeInfo?.broadcast_message, routeInfo?.current_hint, 
+    routeInfo?.broadcast_hint_auto_hide, routeInfo?.broadcast_message_auto_hide, 
+    routeInfo?.broadcast_hint_hide_at, routeInfo?.broadcast_message_hide_at,
+    eventInfo?.broadcast_message, eventInfo?.broadcast_hint, eventInfo?.current_hint, 
+    eventInfo?.broadcast_message_auto_hide, eventInfo?.broadcast_hint_auto_hide, 
+    eventInfo?.broadcast_message_hide_at, eventInfo?.broadcast_hint_auto_hide
+  ]);
 
   const handleShowHint = async () => {
     if (!showHint && team) {
@@ -987,7 +1000,7 @@ export default function TeamDashboard() {
                       <span className="text-xl relative z-10">📢</span>
                       <div className="text-left relative z-10">
                         <p className="text-[9px] text-purple-400 font-extrabold uppercase tracking-[0.15em] mb-1">ADMIN BROADCAST HINT</p>
-                        <p className="italic text-slate-100 font-medium text-xs leading-relaxed">"{team?.broadcast_hint || routeInfo?.broadcast_hint}"</p>
+                        <p className="italic text-slate-100 font-medium text-xs leading-relaxed">"{team?.broadcast_hint || team?.broadcast_message || team?.current_hint || routeInfo?.broadcast_hint || routeInfo?.current_hint || routeInfo?.broadcast_message}"</p>
                       </div>
                     </div>
                   )}

@@ -605,7 +605,15 @@ export default function AdminDashboard() {
             current_clue_id: firstClueId,
             progress_percent: 0,
             completed_clues: 0,
-            total_clues: totalClues
+            total_clues: totalClues,
+            broadcast_hint: "",
+            broadcast_message: "",
+            current_hint: "",
+            broadcast_hint_auto_hide: false,
+            broadcast_message_auto_hide: false,
+            broadcast_hint_hide_at: null,
+            broadcast_message_hide_at: null,
+            broadcast_hint_updated_at: null
           });
           
           batch.update(doc(db, 'leaderboard', t.id), {
@@ -621,6 +629,19 @@ export default function AdminDashboard() {
           });
         });
 
+        // Clear championship route broadcast hint
+        const champRouteRef = doc(db, 'routes', 'championship');
+        batch.update(champRouteRef, {
+          broadcast_hint: "",
+          broadcast_message: "",
+          current_hint: "",
+          broadcast_hint_auto_hide: false,
+          broadcast_message_auto_hide: false,
+          broadcast_hint_hide_at: null,
+          broadcast_message_hide_at: null,
+          broadcast_hint_updated_at: null
+        });
+
         batch.update(eventRef, {
           status: 'championship',
           current_round: 2,
@@ -629,7 +650,15 @@ export default function AdminDashboard() {
           total_paused_duration_seconds: 0,
           scans_locked: false,
           championship_winner_id: "",
-          championship_winner_name: ""
+          championship_winner_name: "",
+          broadcast_message: "",
+          broadcast_hint: "",
+          current_hint: "",
+          broadcast_message_auto_hide: false,
+          broadcast_hint_auto_hide: false,
+          broadcast_message_hide_at: null,
+          broadcast_hint_hide_at: null,
+          broadcast_message_updated_at: null
         });
 
         await batch.commit();
@@ -861,9 +890,15 @@ export default function AdminDashboard() {
         const routeRef = doc(db, 'routes', 'championship');
         batch.update(routeRef, { 
           broadcast_hint: champBroadcastHintText.trim(),
+          broadcast_message: champBroadcastHintText.trim(),
+          current_hint: champBroadcastHintText.trim(),
           broadcast_hint_auto_hide: champBroadcastAutoHide,
+          broadcast_message_auto_hide: champBroadcastAutoHide,
           broadcast_hint_hide_at: hideAt,
-          broadcast_hint_updated_at: serverTimestamp()
+          broadcast_message_hide_at: hideAt,
+          broadcast_updated_at: serverTimestamp(),
+          broadcast_hint_updated_at: serverTimestamp(),
+          hint_updated_at: serverTimestamp()
         });
         await logAuditLocal('broadcast_hint', adminUser, '127.0.0.1', null, `Admin broadcasted hint to all finalists: "${champBroadcastHintText}"`);
       } else if (champBroadcastTarget === 'one_finalist') {
@@ -874,9 +909,15 @@ export default function AdminDashboard() {
         const teamRef = doc(db, 'teams', champSelectedFinalistId);
         batch.update(teamRef, { 
           broadcast_hint: champBroadcastHintText.trim(),
+          broadcast_message: champBroadcastHintText.trim(),
+          current_hint: champBroadcastHintText.trim(),
           broadcast_hint_auto_hide: champBroadcastAutoHide,
+          broadcast_message_auto_hide: champBroadcastAutoHide,
           broadcast_hint_hide_at: hideAt,
-          broadcast_hint_updated_at: serverTimestamp()
+          broadcast_message_hide_at: hideAt,
+          broadcast_updated_at: serverTimestamp(),
+          broadcast_hint_updated_at: serverTimestamp(),
+          hint_updated_at: serverTimestamp()
         });
         targetRouteId = targetTeam?.route_id || 'championship';
         targetRouteName = `Team: ${targetTeam?.team_name || 'Finalist'}`;
@@ -885,16 +926,29 @@ export default function AdminDashboard() {
         const eventRef = doc(db, 'events', 'active_event');
         batch.update(eventRef, { 
           broadcast_message: champBroadcastHintText.trim(),
+          broadcast_hint: champBroadcastHintText.trim(),
+          current_hint: champBroadcastHintText.trim(),
           broadcast_message_auto_hide: champBroadcastAutoHide,
+          broadcast_hint_auto_hide: champBroadcastAutoHide,
           broadcast_message_hide_at: hideAt,
-          broadcast_message_updated_at: serverTimestamp()
+          broadcast_hint_hide_at: hideAt,
+          broadcast_message_updated_at: serverTimestamp(),
+          broadcast_hint_updated_at: serverTimestamp(),
+          broadcast_updated_at: serverTimestamp(),
+          hint_updated_at: serverTimestamp()
         });
         routes.forEach(r => {
           batch.update(doc(db, 'routes', r.id), { 
             broadcast_hint: champBroadcastHintText.trim(),
+            broadcast_message: champBroadcastHintText.trim(),
+            current_hint: champBroadcastHintText.trim(),
             broadcast_hint_auto_hide: champBroadcastAutoHide,
+            broadcast_message_auto_hide: champBroadcastAutoHide,
             broadcast_hint_hide_at: hideAt,
-            broadcast_hint_updated_at: serverTimestamp()
+            broadcast_message_hide_at: hideAt,
+            broadcast_updated_at: serverTimestamp(),
+            broadcast_hint_updated_at: serverTimestamp(),
+            hint_updated_at: serverTimestamp()
           });
         });
         targetRouteId = 'everyone';
@@ -941,9 +995,15 @@ export default function AdminDashboard() {
       // Update route
       batch.update(routeRef, {
         broadcast_hint: broadcastHintText.trim(),
+        broadcast_message: broadcastHintText.trim(),
+        current_hint: broadcastHintText.trim(),
         broadcast_hint_auto_hide: broadcastAutoHide,
+        broadcast_message_auto_hide: broadcastAutoHide,
         broadcast_hint_hide_at: hideAt,
-        broadcast_hint_updated_at: serverTimestamp()
+        broadcast_message_hide_at: hideAt,
+        broadcast_updated_at: serverTimestamp(),
+        broadcast_hint_updated_at: serverTimestamp(),
+        hint_updated_at: serverTimestamp()
       });
       
       // Add broadcast history
@@ -982,9 +1042,15 @@ export default function AdminDashboard() {
       // Clear route
       batch.update(routeRef, {
         broadcast_hint: "",
+        broadcast_message: "",
+        current_hint: "",
         broadcast_hint_auto_hide: false,
+        broadcast_message_auto_hide: false,
         broadcast_hint_hide_at: null,
-        broadcast_hint_updated_at: serverTimestamp()
+        broadcast_message_hide_at: null,
+        broadcast_updated_at: serverTimestamp(),
+        broadcast_hint_updated_at: serverTimestamp(),
+        hint_updated_at: serverTimestamp()
       });
       
       // Add a history item for clearing
