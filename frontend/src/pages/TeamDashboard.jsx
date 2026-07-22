@@ -243,6 +243,8 @@ export default function TeamDashboard() {
     return 'playing';
   };
 
+  const stateCase = getTeamStateCase();
+
   const getTeamRank = () => {
     if (leaderboard.length === 0 || !team) return '-';
     
@@ -369,8 +371,6 @@ export default function TeamDashboard() {
       return () => clearTimeout(timer);
     }
   }, [stateCase, countdownFinished, tempOverrideWaiting]);
-
-  const stateCase = getTeamStateCase();
 
   return (
     <div className="min-h-screen bg-slate-950 p-4 md:p-8 relative">
