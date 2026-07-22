@@ -314,6 +314,8 @@ export default function TeamDashboard() {
     }
   }, [team?.status, eventInfo?.status, team?.is_qualifying_winner, team?.is_grand_winner]);
 
+  const stateCase = getTeamStateCase();
+
   return (
     <div className="min-h-screen bg-slate-950 p-4 md:p-8 relative">
       <div className="absolute top-10 left-10 w-96 h-96 rounded-full glow-purple opacity-20 pointer-events-none"></div>
