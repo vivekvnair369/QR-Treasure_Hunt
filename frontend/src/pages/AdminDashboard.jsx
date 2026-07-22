@@ -490,6 +490,7 @@ export default function AdminDashboard() {
           current_round: 1,
           status: "qualifying",
           started_at: null,
+          event_start: null,
           completed_at: null,
           winner_team_id: null,
           championship_started: false,

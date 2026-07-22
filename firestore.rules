@@ -45,7 +45,7 @@ service cloud.firestore {
             resource.data.status != 'paused' &&
             (
               // Subcase 2a: Starting the event
-              (resource.data.status == 'registered' || resource.data.status == 'checked_in') &&
+              (resource.data.status == 'registered' || resource.data.status == 'checked_in' || resource.data.status == 'waiting') &&
               request.resource.data.status == 'active' &&
               request.resource.data.start_time == request.time &&
               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'start_time'])

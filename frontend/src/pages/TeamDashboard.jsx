@@ -118,7 +118,7 @@ export default function TeamDashboard() {
   useEffect(() => {
     if (team && team.status === 'active' && team.start_time) {
       const interval = setInterval(() => {
-        const start = team.start_time.seconds * 1000;
+        const start = team.start_time.seconds ? (team.start_time.seconds * 1000) : (team.start_time.toMillis ? team.start_time.toMillis() : Date.now());
         const now = Date.now();
         
         const totalPauseSecs = team.total_paused_duration_seconds || 0;
@@ -143,7 +143,7 @@ export default function TeamDashboard() {
   useEffect(() => {
     if (eventInfo && ['running', 'qualifying', 'championship'].includes(eventInfo.status) && eventInfo.event_start && eventInfo.countdown_timer_active) {
       const interval = setInterval(() => {
-        const start = eventInfo.event_start.seconds * 1000;
+        const start = eventInfo.event_start.seconds ? (eventInfo.event_start.seconds * 1000) : (eventInfo.event_start.toMillis ? eventInfo.event_start.toMillis() : Date.now());
         const limitSecs = (eventInfo.max_time_limit_minutes + eventInfo.grace_time_minutes) * 60;
         const totalPauseSecs = eventInfo.total_paused_duration_seconds || 0;
         
