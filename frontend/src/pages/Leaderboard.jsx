@@ -8,7 +8,6 @@ import toast from 'react-hot-toast';
 export default function Leaderboard() {
   const navigate = useNavigate();
   const [standings, setStandings] = useState([]);
-  const [clues, setClues] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -23,13 +22,8 @@ export default function Leaderboard() {
       setLoading(false);
     });
 
-    const unsubClues = onSnapshot(collection(db, 'clues'), (snap) => {
-      setClues(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-
     return () => {
       unsub();
-      unsubClues();
     };
   }, []);
 
@@ -42,18 +36,15 @@ export default function Leaderboard() {
 
   const getProgressDetails = (t) => {
     if (!t) return { percent: 0, completed: 0, total: 3 };
-    const routeClues = clues.filter(c => c.route_id === t.route_id);
-    const total = routeClues.length || 3;
-    const completed = t.status === 'finished' ? total : Math.max(0, (t.current_sequence || 1) - 1);
     return {
-      percent: Math.round((completed / total) * 100),
-      completed,
-      total
+      percent: t.progress_percent || 0,
+      completed: t.completed_clues || 0,
+      total: t.total_clues || 3
     };
   };
 
   const getTeamProgressPercent = (t) => {
-    return getProgressDetails(t).percent;
+    return t.progress_percent || 0;
   };
 
   const sortTeams = (list) => {
@@ -64,12 +55,12 @@ export default function Leaderboard() {
       const isWinner = t.is_grand_winner || t.is_qualifying_winner;
       
       if (t.status === 'finished' || isWinner) {
-        return [0, elapsed, t.team_name];
+        return [0, elapsed, t.team_name || ""];
       }
       if (t.status === 'active') {
-        return [1, -progress, elapsed, t.team_name];
+        return [1, -progress, elapsed, t.team_name || ""];
       }
-      return [2, 0, 0, t.team_name];
+      return [2, 0, 0, t.team_name || ""];
     };
     
     return [...list].sort((a, b) => {
@@ -77,7 +68,7 @@ export default function Leaderboard() {
       const kb = sortKey(b);
       for (let i = 0; i < 4; i++) {
         if (ka[i] !== kb[i]) {
-          if (typeof ka[i] === 'string') return ka[i].localeCompare(kb[i]);
+          if (typeof ka[i] === 'string') return ka[i].localeCompare(kb[i] || "");
           return ka[i] - kb[i];
         }
       }

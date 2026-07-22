@@ -30,8 +30,6 @@ export default function TeamDashboard() {
   const [countdownNum, setCountdownNum] = useState(3);
   const [countdownFinished, setCountdownFinished] = useState(false);
   const [tempOverrideWaiting, setTempOverrideWaiting] = useState(false);
-  const [allClues, setAllClues] = useState([]);
-
   // Subscribe to Active Event Info
   useEffect(() => {
     const unsubEvent = onSnapshot(query(collection(db, 'events'), where('active', '==', true), limit(1)), (snap) => {
@@ -41,13 +39,8 @@ export default function TeamDashboard() {
       }
     });
 
-    const unsubAllClues = onSnapshot(collection(db, 'clues'), (snap) => {
-      setAllClues(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-
     return () => {
       unsubEvent();
-      unsubAllClues();
     };
   }, []);
 
@@ -174,13 +167,10 @@ export default function TeamDashboard() {
     }
   }, [eventInfo]);
 
-  // Calculate Progress Percentage
   const getProgress = () => {
     if (!team) return 0;
     if (team.status === 'completed' || team.status === 'finished') return 100;
-    const total = routeCluesCount || 3;
-    const current = team.current_sequence || 1;
-    return Math.round(((current - 1) / total) * 100);
+    return team.progress_percent || 0;
   };
 
   const getTeamStateCase = () => {
@@ -256,35 +246,27 @@ export default function TeamDashboard() {
   const getTeamRank = () => {
     if (leaderboard.length === 0 || !team) return '-';
     
-    const getProgress = (t) => {
-      if (t.status === 'finished' || t.status === 'completed') return 100;
-      const routeClues = allClues.filter(c => c.route_id === t.route_id);
-      const total = routeClues.length || 3;
-      const completed = Math.max(0, (t.current_sequence || 1) - 1);
-      return (completed / total) * 100;
-    };
-
     // Sort leaderboard using same criteria as Leaderboard.jsx
     const sorted = [...leaderboard].sort((a, b) => {
       const sortKey = (t) => {
-        const progress = getProgress(t);
+        const progress = t.progress_percent || 0;
         const elapsed = t.elapsed_seconds || 0;
         const isWinner = t.is_grand_winner || t.is_qualifying_winner;
         
         if (t.status === 'finished' || isWinner) {
-          return [0, elapsed, t.team_name];
+          return [0, elapsed, t.team_name || ""];
         }
         if (t.status === 'active') {
-          return [1, -progress, elapsed, t.team_name];
+          return [1, -progress, elapsed, t.team_name || ""];
         }
-        return [2, 0, 0, t.team_name];
+        return [2, 0, 0, t.team_name || ""];
       };
       
       const ka = sortKey(a);
       const kb = sortKey(b);
       for (let i = 0; i < 4; i++) {
         if (ka[i] !== kb[i]) {
-          if (typeof ka[i] === 'string') return ka[i].localeCompare(kb[i]);
+          if (typeof ka[i] === 'string') return ka[i].localeCompare(kb[i] || "");
           return ka[i] - kb[i];
         }
       }
@@ -545,10 +527,9 @@ export default function TeamDashboard() {
                 ) : (
                   finalists.map((f, i) => {
                     // Group clues to calculate progress % dynamically
-                    const routeClues = allClues.filter(c => c.route_id === f.route_id);
-                    const total = routeClues.length || 3;
-                    const completed = f.status === 'finished' ? total : Math.max(0, (f.current_sequence || 1) - 1);
-                    const progress = Math.round((completed / total) * 100);
+                    const progress = f.progress_percent || 0;
+                    const completed = f.completed_clues || 0;
+                    const total = f.total_clues || 3;
                     return (
                       <div key={i} className="space-y-2 border-b border-slate-900/60 pb-4 last:border-0 last:pb-0">
                         <div className="flex justify-between items-center">
