@@ -176,7 +176,7 @@ async function seed() {
         member_names: "Alice, Bob, Charlie",
         route_id: t.route,
         original_route_id: t.route,
-        status: "registered",
+        status: "waiting",
         current_sequence: 1,
         time_penalty_minutes: 0,
         bonus_time_minutes: 0,

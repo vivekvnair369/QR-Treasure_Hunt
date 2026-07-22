@@ -232,7 +232,7 @@ export default function TeamDashboard() {
       }
 
       // Normal play
-      if (team.status === 'registered' || team.status === 'checked_in') {
+      if (team.status === 'registered' || team.status === 'checked_in' || team.status === 'waiting') {
         return 'not_started';
       }
       return 'playing';
@@ -713,12 +713,12 @@ export default function TeamDashboard() {
                   )}
                 </div>
                 <p className="text-xs text-slate-400">
-                  {team?.status === 'registered' && 'Checked-in. Scan the Start QR!'}
+                  {(team?.status === 'registered' || team?.status === 'waiting') && 'Checked-in. Scan the Start QR!'}
                   {team?.status === 'active' && 'Find your next checkpoint QR!'}
                   {team?.status === 'paused' && 'Scanning is temporarily disabled.'}
                 </p>
               </div>
-
+ 
               {/* Timer Card */}
               <div className="glass-card p-6 rounded-2xl flex flex-col justify-between animate-fadeIn">
                 <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
@@ -731,7 +731,7 @@ export default function TeamDashboard() {
                   {eventInfo?.countdown_timer_active ? 'Time remaining to complete the hunt.' : 'Timer starts upon scanning the first QR.'}
                 </p>
               </div>
-
+ 
               {/* Progress Card */}
               <div className="glass-card p-6 rounded-2xl flex flex-col justify-between animate-fadeIn">
                 <span className="text-xs text-slate-500 font-medium">COMPLETION</span>
@@ -752,7 +752,7 @@ export default function TeamDashboard() {
                 </p>
               </div>
             </div>
-
+ 
             {/* Members List */}
             {team?.member_names && (
               <div className="glass-card p-6 rounded-2xl mb-8 text-left animate-fadeIn">
@@ -768,7 +768,7 @@ export default function TeamDashboard() {
                 </div>
               </div>
             )}
-
+ 
             {/* Main Content Area */}
             <div className="glass-card p-8 rounded-3xl mb-8 animate-fadeIn">
               {stateCase === 'pre_event' ? (
@@ -782,7 +782,7 @@ export default function TeamDashboard() {
                     The event has not started yet. Please wait for the coordinators to officially launch the symposium activity.
                   </p>
                 </div>
-              ) : (team?.status === 'registered' || team?.status === 'checked_in') ? (
+              ) : (team?.status === 'registered' || team?.status === 'checked_in' || team?.status === 'waiting') ? (
                 <div className="text-center py-12 flex flex-col items-center">
                   <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-full inline-flex text-amber-400 mb-6 animate-bounce">
                     <Lock className="w-12 h-12" />

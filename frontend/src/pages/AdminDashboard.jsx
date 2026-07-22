@@ -301,7 +301,7 @@ export default function AdminDashboard() {
   // Control Action triggers
   const triggerEventAction = async (action, extra = {}) => {
     if (action === 'end' && !window.confirm('Are you sure you want to end the event?')) return;
-    if (action === 'soft_reset' && !window.confirm('Are you sure you want to soft reset? Wipes logs & progress.')) return;
+    if (action === 'soft_reset' && !window.confirm("Are you sure you want to reset the event?\n\nThis will reset all gameplay progress and results, but will NOT delete any teams, routes, clues, QR codes, or authentication accounts.")) return;
     if (action === 'full_reset' && !window.confirm('⚠️ WARNING: Full reset wipes routes, clues, scan logs, and teams!')) return;
 
     try {
@@ -421,19 +421,32 @@ export default function AdminDashboard() {
 
         batch = writeBatch(db);
         teams.forEach(t => {
+          const routeId = t.original_route_id || t.route_id;
+          
+          // Get first clue ID of the route
+          const routeClues = clues.filter(c => c.route_id === routeId).sort((a, b) => (a.sequence || 1) - (b.sequence || 1));
+          const firstClueId = routeClues.length > 0 ? routeClues[0].id : "";
+
           batch.update(doc(db, 'teams', t.id), {
-            start_time: null,
-            finish_time: null,
-            status: 'registered',
             current_sequence: 1,
+            completed: false,
+            finish_time: null,
+            finished_at: null,
+            start_time: null,
+            elapsed_time: 0,
+            current_clue_id: firstClueId,
+            last_scan_time: null,
+            is_qualifying_winner: false,
+            is_grand_winner: false,
+            is_finalist: false,
+            status: 'waiting',
             time_penalty_minutes: 0,
             bonus_time_minutes: 0,
             hints_used: 0,
             total_paused_duration_seconds: 0,
             paused_at: null,
-            is_qualifying_winner: false,
             round: 1,
-            route_id: t.original_route_id || t.route_id
+            route_id: routeId
           });
         });
         await batch.commit();
@@ -442,28 +455,63 @@ export default function AdminDashboard() {
         batch = writeBatch(db);
         routes.forEach(r => {
           batch.update(doc(db, 'routes', r.id), {
-            winner_team_id: "",
+            winner_team_id: null,
             winner_team_name: "",
             winner_finish_time: null,
-            broadcast_hint: ""
+            current_hint: "",
+            broadcast_hint: "",
+            broadcast_message: "",
+            hint_updated_at: null
           });
         });
         await batch.commit();
 
+        // Reset Leaderboard without deleting documents
         const lbSnaps = await getDocs(collection(db, 'leaderboard'));
         batch = writeBatch(db);
-        lbSnaps.forEach(doc => batch.delete(doc.ref));
+        lbSnaps.forEach(docSnap => {
+          const teamId = docSnap.id;
+          const t = teams.find(teamDoc => teamDoc.id === teamId);
+          const routeId = t ? (t.original_route_id || t.route_id) : "";
+          batch.update(docSnap.ref, {
+            status: 'waiting',
+            current_sequence: 1,
+            elapsed_seconds: 0,
+            hints_used: 0,
+            finish_time: null,
+            is_qualifying_winner: false,
+            is_grand_winner: false,
+            route_id: routeId
+          });
+        });
         await batch.commit();
 
         await updateDoc(eventRef, {
+          current_round: 1,
+          status: "qualifying",
+          started_at: null,
+          completed_at: null,
+          winner_team_id: null,
+          championship_started: false,
+          broadcast_message: "",
+          event_completed: false,
+          timeout: false,
           paused_at: null,
           total_paused_duration_seconds: 0,
-          current_round: 1,
-          championship_started: false,
           championship_winner_id: "",
           championship_winner_name: ""
         });
-        await logAuditLocal('event_control', adminUser, ip, null, 'Soft reset completed. Wiped logs and progress.');
+        
+        toast.dismiss(); // dismiss loading toast
+        toast.success(
+          <div>
+            <strong>✅ Event has been successfully reset.</strong>
+            <div className="text-[10px] mt-1 text-slate-400">All gameplay progress has been cleared.</div>
+            <div className="text-[10px] text-slate-400">Teams, routes, clues, QR codes, and authentication accounts have been preserved.</div>
+          </div>,
+          { duration: 5000 }
+        );
+        await logAuditLocal('event_control', adminUser, ip, null, 'Soft reset completed. All gameplay progress has been cleared.');
       } else if (action === 'full_reset') {
         let batch = writeBatch(db);
         const scanLogsSnaps = await getDocs(collection(db, 'scanLogs'));

@@ -120,7 +120,7 @@ export default function Scanner() {
       return { status: 'invalid_sequence', message: 'Checkpoint scanned out of order.', clue: { id: qrData.clue_id, ...clueData } };
     }
 
-    const isFirstClue = currentSeq === 1 && (teamData.status === 'registered' || teamData.status === 'checked_in');
+    const isFirstClue = currentSeq === 1 && (teamData.status === 'registered' || teamData.status === 'checked_in' || teamData.status === 'waiting');
     const isLastClue = currentSeq >= eventData.num_clues_per_route;
 
     const updates = {};
