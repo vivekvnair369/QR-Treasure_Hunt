@@ -30,6 +30,8 @@ export default function TeamDashboard() {
   const [countdownNum, setCountdownNum] = useState(3);
   const [countdownFinished, setCountdownFinished] = useState(false);
   const [tempOverrideWaiting, setTempOverrideWaiting] = useState(false);
+  const [showRouteBroadcast, setShowRouteBroadcast] = useState(false);
+  const [showGlobalBroadcast, setShowGlobalBroadcast] = useState(false);
   // Subscribe to Active Event Info
   useEffect(() => {
     const unsubEvent = onSnapshot(query(collection(db, 'events'), where('active', '==', true), limit(1)), (snap) => {
@@ -97,6 +99,78 @@ export default function TeamDashboard() {
 
     return unsubClues;
   }, [team?.route_id, team?.current_sequence]);
+
+  // Real-time Broadcast Visibility & Auto-hide Timer
+  useEffect(() => {
+    // 1. Route Broadcast Check
+    const activeHint = team?.broadcast_hint || routeInfo?.broadcast_hint;
+    const isAutoHide = team?.broadcast_hint
+      ? team?.broadcast_hint_auto_hide
+      : routeInfo?.broadcast_hint_auto_hide;
+    const hideAt = team?.broadcast_hint
+      ? team?.broadcast_hint_hide_at
+      : routeInfo?.broadcast_hint_hide_at;
+
+    let routeTimeoutId = null;
+
+    if (activeHint) {
+      console.log("Broadcast received:", activeHint);
+      if (isAutoHide && hideAt) {
+        const expiry = hideAt.seconds ? (hideAt.seconds * 1000) : new Date(hideAt).getTime();
+        const delay = expiry - Date.now();
+        if (delay <= 0) {
+          setShowRouteBroadcast(false);
+        } else {
+          setShowRouteBroadcast(true);
+          console.log(`Route broadcast auto-hiding in ${Math.round(delay/1000)}s.`);
+          routeTimeoutId = setTimeout(() => {
+            setShowRouteBroadcast(false);
+            console.log("Route broadcast UI updated (expired).");
+          }, delay);
+        }
+      } else {
+        setShowRouteBroadcast(true);
+        console.log("Route broadcast UI updated (persistent).");
+      }
+    } else {
+      setShowRouteBroadcast(false);
+    }
+
+    // 2. Global Event Broadcast Check
+    const activeMsg = eventInfo?.broadcast_message;
+    const isGlobalAutoHide = eventInfo?.broadcast_message_auto_hide;
+    const globalHideAt = eventInfo?.broadcast_message_hide_at;
+
+    let globalTimeoutId = null;
+
+    if (activeMsg) {
+      console.log("Global broadcast received:", activeMsg);
+      if (isGlobalAutoHide && globalHideAt) {
+        const expiry = globalHideAt.seconds ? (globalHideAt.seconds * 1000) : new Date(globalHideAt).getTime();
+        const delay = expiry - Date.now();
+        if (delay <= 0) {
+          setShowGlobalBroadcast(false);
+        } else {
+          setShowGlobalBroadcast(true);
+          console.log(`Global broadcast auto-hiding in ${Math.round(delay/1000)}s.`);
+          globalTimeoutId = setTimeout(() => {
+            setShowGlobalBroadcast(false);
+            console.log("Global broadcast UI updated (expired).");
+          }, delay);
+        }
+      } else {
+        setShowGlobalBroadcast(true);
+        console.log("Global broadcast UI updated (persistent).");
+      }
+    } else {
+      setShowGlobalBroadcast(false);
+    }
+
+    return () => {
+      if (routeTimeoutId) clearTimeout(routeTimeoutId);
+      if (globalTimeoutId) clearTimeout(globalTimeoutId);
+    };
+  }, [team?.broadcast_hint, team?.broadcast_hint_auto_hide, team?.broadcast_hint_hide_at, routeInfo?.broadcast_hint, routeInfo?.broadcast_hint_auto_hide, routeInfo?.broadcast_hint_hide_at, eventInfo?.broadcast_message, eventInfo?.broadcast_message_auto_hide, eventInfo?.broadcast_message_hide_at]);
 
   const handleShowHint = async () => {
     if (!showHint && team) {
@@ -578,10 +652,11 @@ export default function TeamDashboard() {
             </p>
 
             {/* Live Announcements */}
-            {eventInfo?.broadcast_message && (
-              <div className="max-w-md mx-auto p-4 rounded-2xl bg-purple-950/40 border border-purple-500/30 text-purple-200 text-sm font-semibold flex items-start gap-3 shadow-lg shadow-purple-500/5 animate-pulse text-left">
-                <span className="text-lg">📢</span>
-                <div>
+            {showGlobalBroadcast && (
+              <div className="max-w-md mx-auto p-4 rounded-2xl bg-purple-950/40 border border-purple-500/30 text-purple-200 text-sm font-semibold flex items-start gap-3 shadow-lg shadow-purple-500/5 animate-pulse text-left relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-r from-purple-500/5 to-pink-500/5 pointer-events-none"></div>
+                <span className="text-lg relative z-10">📢</span>
+                <div className="relative z-10">
                   <p className="text-[9px] text-purple-400 font-bold uppercase tracking-widest mb-0.5">Announcement</p>
                   <p className="italic text-slate-200 font-medium">"{eventInfo.broadcast_message}"</p>
                 </div>
@@ -906,12 +981,13 @@ export default function TeamDashboard() {
                 </div>
               ) : activeClue ? (
                 <div>
-                  {(routeInfo?.broadcast_hint || team?.broadcast_hint) && (
-                    <div className="mb-6 p-4 rounded-2xl bg-purple-950/40 border border-purple-500/30 text-purple-200 text-sm font-semibold flex items-start gap-3 shadow-lg shadow-purple-500/5 animate-pulse">
-                      <span className="text-lg">📢</span>
-                      <div className="text-left">
-                        <p className="text-[9px] text-purple-400 font-bold uppercase tracking-widest mb-0.5">ADMIN BROADCAST HINT</p>
-                        <p className="italic text-slate-200 font-medium">"{team?.broadcast_hint || routeInfo?.broadcast_hint}"</p>
+                  {showRouteBroadcast && (
+                    <div className="mb-6 p-5 rounded-2xl bg-purple-950/40 border border-purple-500/35 text-purple-200 text-sm font-semibold flex items-start gap-3 shadow-lg shadow-purple-500/10 animate-pulse relative overflow-hidden">
+                      <div className="absolute inset-0 bg-gradient-to-r from-purple-500/5 to-pink-500/5 pointer-events-none"></div>
+                      <span className="text-xl relative z-10">📢</span>
+                      <div className="text-left relative z-10">
+                        <p className="text-[9px] text-purple-400 font-extrabold uppercase tracking-[0.15em] mb-1">ADMIN BROADCAST HINT</p>
+                        <p className="italic text-slate-100 font-medium text-xs leading-relaxed">"{team?.broadcast_hint || routeInfo?.broadcast_hint}"</p>
                       </div>
                     </div>
                   )}

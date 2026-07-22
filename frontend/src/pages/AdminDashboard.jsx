@@ -79,6 +79,12 @@ export default function AdminDashboard() {
   const [champSelectedFinalistId, setChampSelectedFinalistId] = useState('');
   const [champBroadcastHintText, setChampBroadcastHintText] = useState('');
 
+  const [broadcastAutoHide, setBroadcastAutoHide] = useState(false);
+  const [broadcastDuration, setBroadcastDuration] = useState(5);
+  const [champBroadcastAutoHide, setChampBroadcastAutoHide] = useState(false);
+  const [champBroadcastDuration, setChampBroadcastDuration] = useState(5);
+  const [broadcastsHistory, setBroadcastsHistory] = useState([]);
+
   const safeTimestampToInputString = (ts) => {
     if (!ts) return '';
     try {
@@ -187,6 +193,14 @@ export default function AdminDashboard() {
       setQrCodes(list);
     });
 
+    // H. Broadcasts subscription (Real-time History)
+    const unsubBroadcasts = onSnapshot(query(collection(db, 'broadcasts'), orderBy('timestamp', 'desc'), limit(50)), (snap) => {
+      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setBroadcastsHistory(list);
+    }, (err) => {
+      console.error("Broadcasts history subscription error:", err);
+    });
+
     return () => {
       unsubEvent();
       unsubTeams();
@@ -195,6 +209,7 @@ export default function AdminDashboard() {
       unsubScans();
       unsubAudit();
       unsubQRCodes();
+      unsubBroadcasts();
     };
   }, []);
 
@@ -837,10 +852,19 @@ export default function AdminDashboard() {
     try {
       const batch = writeBatch(db);
       const adminUser = user?.username || 'admin';
+      const hideAt = champBroadcastAutoHide ? new Date(Date.now() + Number(champBroadcastDuration) * 60 * 1000) : null;
       
+      let targetRouteId = 'championship';
+      let targetRouteName = 'Championship Route';
+
       if (champBroadcastTarget === 'all_finalists') {
         const routeRef = doc(db, 'routes', 'championship');
-        batch.update(routeRef, { broadcast_hint: champBroadcastHintText.trim() });
+        batch.update(routeRef, { 
+          broadcast_hint: champBroadcastHintText.trim(),
+          broadcast_hint_auto_hide: champBroadcastAutoHide,
+          broadcast_hint_hide_at: hideAt,
+          broadcast_hint_updated_at: serverTimestamp()
+        });
         await logAuditLocal('broadcast_hint', adminUser, '127.0.0.1', null, `Admin broadcasted hint to all finalists: "${champBroadcastHintText}"`);
       } else if (champBroadcastTarget === 'one_finalist') {
         if (!champSelectedFinalistId) {
@@ -848,16 +872,48 @@ export default function AdminDashboard() {
         }
         const targetTeam = teams.find(t => t.id === champSelectedFinalistId);
         const teamRef = doc(db, 'teams', champSelectedFinalistId);
-        batch.update(teamRef, { broadcast_hint: champBroadcastHintText.trim() });
+        batch.update(teamRef, { 
+          broadcast_hint: champBroadcastHintText.trim(),
+          broadcast_hint_auto_hide: champBroadcastAutoHide,
+          broadcast_hint_hide_at: hideAt,
+          broadcast_hint_updated_at: serverTimestamp()
+        });
+        targetRouteId = targetTeam?.route_id || 'championship';
+        targetRouteName = `Team: ${targetTeam?.team_name || 'Finalist'}`;
         await logAuditLocal('broadcast_hint', adminUser, '127.0.0.1', targetTeam?.team_name || null, `Admin broadcasted hint to team ${targetTeam?.team_name}: "${champBroadcastHintText}"`);
       } else if (champBroadcastTarget === 'everyone') {
         const eventRef = doc(db, 'events', 'active_event');
-        batch.update(eventRef, { broadcast_message: champBroadcastHintText.trim() });
-        routes.forEach(r => {
-          batch.update(doc(db, 'routes', r.id), { broadcast_hint: champBroadcastHintText.trim() });
+        batch.update(eventRef, { 
+          broadcast_message: champBroadcastHintText.trim(),
+          broadcast_message_auto_hide: champBroadcastAutoHide,
+          broadcast_message_hide_at: hideAt,
+          broadcast_message_updated_at: serverTimestamp()
         });
+        routes.forEach(r => {
+          batch.update(doc(db, 'routes', r.id), { 
+            broadcast_hint: champBroadcastHintText.trim(),
+            broadcast_hint_auto_hide: champBroadcastAutoHide,
+            broadcast_hint_hide_at: hideAt,
+            broadcast_hint_updated_at: serverTimestamp()
+          });
+        });
+        targetRouteId = 'everyone';
+        targetRouteName = 'Everyone';
         await logAuditLocal('broadcast_hint', adminUser, '127.0.0.1', null, `Admin broadcasted message to everyone: "${champBroadcastHintText}"`);
       }
+
+      // Add to broadcast history
+      const historyRef = doc(collection(db, 'broadcasts'));
+      batch.set(historyRef, {
+        route_id: targetRouteId,
+        route_name: targetRouteName,
+        message: champBroadcastHintText.trim(),
+        timestamp: serverTimestamp(),
+        auto_hide: champBroadcastAutoHide,
+        duration_minutes: champBroadcastAutoHide ? Number(champBroadcastDuration) : null,
+        hide_at: hideAt,
+        status: 'active'
+      });
       
       await batch.commit();
       setChampBroadcastHintText('');
@@ -878,15 +934,40 @@ export default function AdminDashboard() {
     try {
       toast.loading(`Broadcasting hint...`);
       const routeRef = doc(db, 'routes', selectedBroadcastRoute);
-      await updateDoc(routeRef, {
-        broadcast_hint: broadcastHintText.trim()
+      const hideAt = broadcastAutoHide ? new Date(Date.now() + Number(broadcastDuration) * 60 * 1000) : null;
+      
+      const batch = writeBatch(db);
+      
+      // Update route
+      batch.update(routeRef, {
+        broadcast_hint: broadcastHintText.trim(),
+        broadcast_hint_auto_hide: broadcastAutoHide,
+        broadcast_hint_hide_at: hideAt,
+        broadcast_hint_updated_at: serverTimestamp()
       });
+      
+      // Add broadcast history
+      const historyRef = doc(collection(db, 'broadcasts'));
+      batch.set(historyRef, {
+        route_id: selectedBroadcastRoute,
+        route_name: getRouteName(selectedBroadcastRoute),
+        message: broadcastHintText.trim(),
+        timestamp: serverTimestamp(),
+        auto_hide: broadcastAutoHide,
+        duration_minutes: broadcastAutoHide ? Number(broadcastDuration) : null,
+        hide_at: hideAt,
+        status: 'active'
+      });
+      
+      await batch.commit();
+      
       toast.dismiss();
       toast.success(`Hint broadcasted to ${getRouteName(selectedBroadcastRoute)}.`);
       await logAuditLocal('broadcast_hint', 'admin', '127.0.0.1', null, `Admin broadcasted hint to route ${selectedBroadcastRoute}: "${broadcastHintText}"`);
       setBroadcastHintText('');
     } catch (err) {
       toast.dismiss();
+      console.error(err);
       toast.error('Failed to broadcast hint.');
     }
   };
@@ -895,14 +976,38 @@ export default function AdminDashboard() {
     try {
       toast.loading('Clearing broadcast...');
       const routeRef = doc(db, 'routes', routeId);
-      await updateDoc(routeRef, {
-        broadcast_hint: ""
+      
+      const batch = writeBatch(db);
+      
+      // Clear route
+      batch.update(routeRef, {
+        broadcast_hint: "",
+        broadcast_hint_auto_hide: false,
+        broadcast_hint_hide_at: null,
+        broadcast_hint_updated_at: serverTimestamp()
       });
+      
+      // Add a history item for clearing
+      const historyRef = doc(collection(db, 'broadcasts'));
+      batch.set(historyRef, {
+        route_id: routeId,
+        route_name: getRouteName(routeId),
+        message: " [Cleared Broadcast] ",
+        timestamp: serverTimestamp(),
+        auto_hide: false,
+        duration_minutes: null,
+        hide_at: null,
+        status: 'cleared'
+      });
+      
+      await batch.commit();
+      
       toast.dismiss();
       toast.success(`Cleared hint for ${getRouteName(routeId)}.`);
       await logAuditLocal('clear_broadcast', 'admin', '127.0.0.1', null, `Admin cleared broadcast hint for route ${routeId}`);
     } catch (err) {
       toast.dismiss();
+      console.error(err);
       toast.error('Failed to clear broadcast.');
     }
   };
@@ -1726,8 +1831,32 @@ export default function AdminDashboard() {
                           placeholder="e.g. Look under the bench near the entrance..."
                           value={broadcastHintText} 
                           onChange={(e) => setBroadcastHintText(e.target.value)} 
-                          className="w-full px-4 py-2 bg-slate-950 border border-slate-900 text-slate-100 outline-none text-xs focus:border-purple-500 transition-colors rounded-xl"
+                          className="w-full px-4 py-2 bg-slate-950 border border-slate-900 text-slate-100 outline-none text-xs focus:border-purple-500 transition-colors rounded-xl mb-2"
                         />
+                      </div>
+                      <div className="flex items-center justify-between py-1 bg-slate-950/30 px-3 rounded-xl border border-slate-900/50 mb-1">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input 
+                            type="checkbox"
+                            checked={broadcastAutoHide}
+                            onChange={(e) => setBroadcastAutoHide(e.target.checked)}
+                            className="w-3.5 h-3.5 rounded bg-slate-950 border border-slate-900 accent-purple-600"
+                          />
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Enable Auto-hide</span>
+                        </label>
+                        {broadcastAutoHide && (
+                          <div className="flex items-center gap-1.5">
+                            <input 
+                              type="number"
+                              min="1"
+                              max="120"
+                              value={broadcastDuration}
+                              onChange={(e) => setBroadcastDuration(Number(e.target.value))}
+                              className="w-14 px-2 py-1 bg-slate-950 border border-slate-900 text-xs text-center text-slate-100 rounded-lg outline-none focus:border-purple-500 font-mono"
+                            />
+                            <span className="text-[9px] font-bold text-slate-500 uppercase">Min</span>
+                          </div>
+                        )}
                       </div>
                       <div className="flex gap-2">
                         <button 
@@ -1811,6 +1940,74 @@ export default function AdminDashboard() {
                       </div>
                     ))}
                   </div>
+                </div>
+              </div>
+
+              {/* Recent Broadcast History Table */}
+              <div className="glass-card p-6 rounded-3xl border border-slate-900 text-left">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-200 mb-4 flex items-center gap-2">
+                  📜 Recent Broadcast History
+                </h3>
+                <div className="overflow-x-auto border border-slate-900 rounded-2xl bg-slate-950/40">
+                  <table className="w-full text-xs text-left text-slate-350">
+                    <thead className="bg-slate-950 text-slate-400 uppercase text-[9px] font-bold tracking-wider border-b border-slate-900">
+                      <tr>
+                        <th className="px-4 py-3">Time</th>
+                        <th className="px-4 py-3">Route / Target</th>
+                        <th className="px-4 py-3">Message</th>
+                        <th className="px-4 py-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-900/60">
+                      {broadcastsHistory.length === 0 ? (
+                        <tr>
+                          <td colSpan="4" className="px-4 py-8 text-center text-slate-500 italic">
+                            No broadcasts recorded yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        broadcastsHistory.map((b) => {
+                          let displayStatus = 'Active';
+                          let badgeColor = 'bg-green-500/10 text-green-400 border-green-500/15';
+
+                          if (b.status === 'cleared') {
+                            displayStatus = 'Cleared';
+                            badgeColor = 'bg-slate-900 text-slate-500 border-slate-800';
+                          } else {
+                            // Check if superseded
+                            const r = routes.find(route => route.id === b.route_id);
+                            if (r && r.broadcast_hint !== b.message) {
+                              displayStatus = 'Superseded';
+                              badgeColor = 'bg-slate-900 text-slate-500 border-slate-800';
+                            } else if (b.auto_hide && b.hide_at) {
+                              const expiry = b.hide_at.seconds ? (b.hide_at.seconds * 1000) : new Date(b.hide_at).getTime();
+                              if (Date.now() >= expiry) {
+                                displayStatus = 'Expired';
+                                badgeColor = 'bg-red-500/10 text-red-400 border-red-500/15';
+                              }
+                            }
+                          }
+
+                          const timeStr = b.timestamp
+                            ? new Date(b.timestamp.seconds ? b.timestamp.seconds * 1000 : b.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                            : 'Just now';
+
+                          return (
+                            <tr key={b.id} className="hover:bg-slate-950/20">
+                              <td className="px-4 py-3 font-mono text-[10px] text-slate-500 whitespace-nowrap">{timeStr}</td>
+                              <td className="px-4 py-3 font-bold text-slate-350 whitespace-nowrap">{b.route_name}</td>
+                              <td className="px-4 py-3 text-slate-200 max-w-[300px] truncate" title={b.message}>{b.message}</td>
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase border ${badgeColor}`}>
+                                  {displayStatus}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
@@ -2408,6 +2605,31 @@ export default function AdminDashboard() {
                           className="w-full px-4 py-2 bg-slate-950 border border-slate-900 text-slate-100 outline-none text-xs focus:border-purple-500 rounded-xl"
                           required
                         />
+                      </div>
+
+                      <div className="flex items-center justify-between py-1 bg-slate-950/30 px-3 rounded-xl border border-slate-900/50 mb-1">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input 
+                            type="checkbox"
+                            checked={champBroadcastAutoHide}
+                            onChange={(e) => setChampBroadcastAutoHide(e.target.checked)}
+                            className="w-3.5 h-3.5 rounded bg-slate-950 border border-slate-900 accent-purple-650"
+                          />
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Enable Auto-hide</span>
+                        </label>
+                        {champBroadcastAutoHide && (
+                          <div className="flex items-center gap-1.5">
+                            <input 
+                              type="number"
+                              min="1"
+                              max="120"
+                              value={champBroadcastDuration}
+                              onChange={(e) => setChampBroadcastDuration(Number(e.target.value))}
+                              className="w-14 px-2 py-1 bg-slate-950 border border-slate-900 text-xs text-center text-slate-100 rounded-lg outline-none focus:border-purple-500 font-mono"
+                            />
+                            <span className="text-[9px] font-bold text-slate-500 uppercase">Min</span>
+                          </div>
+                        )}
                       </div>
 
                       <button 
