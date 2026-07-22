@@ -40,9 +40,9 @@ export default function Scanner() {
       throw new Error('AITHERON ML 2026 has not started yet. QR scanning is disabled.');
     } else if (eventData.status === 'paused') {
       throw new Error('AITHERON ML 2026 is paused. Checkpoint scanning is suspended.');
-    } else if (['completed', 'archived'].includes(eventData.status)) {
+    } else if (['completed', 'archived', 'timeout'].includes(eventData.status)) {
       throw new Error('AITHERON ML 2026 has ended. Scanning is inactive.');
-    } else if (eventData.status !== 'running') {
+    } else if (!['running', 'qualifying', 'championship'].includes(eventData.status)) {
       throw new Error('QR scanning is not active at this time.');
     }
 
@@ -125,6 +125,7 @@ export default function Scanner() {
 
     const updates = {};
     let statusResult = 'success';
+    const batch = writeBatch(db);
 
     if (isFirstClue) {
       updates.status = 'active';
@@ -132,15 +133,53 @@ export default function Scanner() {
       statusResult = 'success';
     }
 
+    let auditDetails = `Team scanned checkpoint clue #${currentSeq}.`;
+    let actionType = 'team_scan';
+
     if (isLastClue) {
       updates.status = 'finished';
       updates.finish_time = serverTimestamp();
       statusResult = 'finished';
+
+      if (teamData.route_id === 'championship') {
+        // Championship Route completion
+        const evSnapForWin = await getDoc(doc(db, 'events', 'active_event'));
+        const evDataForWin = evSnapForWin.exists() ? evSnapForWin.data() : eventData;
+        if (!evDataForWin.championship_winner_id) {
+          updates.is_grand_winner = true;
+          batch.update(doc(db, 'events', 'active_event'), {
+            championship_winner_id: teamId,
+            championship_winner_name: teamData.team_name
+          });
+          auditDetails = 'Team won the Championship Round and is crowned the Grand Champion!';
+          actionType = 'team_finish';
+        } else {
+          updates.is_grand_winner = false;
+          auditDetails = 'Team finished the Championship Route (placed after winner).';
+          actionType = 'team_finish';
+        }
+      } else {
+        // Qualifying Route completion
+        const routeSnap = await getDoc(doc(db, 'routes', teamData.route_id));
+        if (routeSnap.exists() && !routeSnap.data().winner_team_id) {
+          updates.is_qualifying_winner = true;
+          batch.update(doc(db, 'routes', teamData.route_id), {
+            winner_team_id: teamId,
+            winner_team_name: teamData.team_name,
+            winner_finish_time: serverTimestamp()
+          });
+          auditDetails = 'Team completed their route as the Block Winner!';
+          actionType = 'team_finish';
+        } else {
+          updates.is_qualifying_winner = false;
+          auditDetails = 'Team completed their route (did not qualify for finals).';
+          actionType = 'team_finish';
+        }
+      }
     } else {
       updates.current_sequence = currentSeq + 1;
     }
 
-    const batch = writeBatch(db);
     batch.update(doc(db, 'teams', teamId), updates);
 
     batch.set(doc(collection(db, 'scanLogs')), {
@@ -153,15 +192,11 @@ export default function Scanner() {
       ip_address: '127.0.0.1'
     });
 
-    let auditDetails = `Team scanned checkpoint clue #${currentSeq}.`;
-    let actionType = 'team_scan';
     if (isFirstClue) {
       auditDetails = 'Team started the treasure hunt.';
       actionType = 'team_start';
-    } else if (isLastClue) {
-      auditDetails = 'Team successfully completed the treasure hunt!';
-      actionType = 'team_finish';
     }
+
     batch.set(doc(collection(db, 'auditLogs')), {
       action_type: actionType,
       performed_by: teamData.leader_name || 'Team',
@@ -177,11 +212,15 @@ export default function Scanner() {
     
     batch.set(doc(db, 'leaderboard', teamId), {
       team_name: teamData.team_name,
+      college_name: teamData.college_name || "",
       status: updates.status || teamData.status,
       current_sequence: updates.current_sequence || teamData.current_sequence,
       elapsed_seconds: elapsedSeconds - ((teamData.bonus_time_minutes || 0) * 60) + ((teamData.time_penalty_minutes || 0) * 60),
       hints_used: teamData.hints_used || 0,
-      finish_time: isLastClue ? serverTimestamp() : null
+      finish_time: isLastClue ? serverTimestamp() : null,
+      is_qualifying_winner: updates.is_qualifying_winner !== undefined ? updates.is_qualifying_winner : (teamData.is_qualifying_winner || false),
+      is_grand_winner: updates.is_grand_winner !== undefined ? updates.is_grand_winner : (teamData.is_grand_winner || false),
+      route_id: teamData.route_id
     }, { merge: true });
 
     await batch.commit();

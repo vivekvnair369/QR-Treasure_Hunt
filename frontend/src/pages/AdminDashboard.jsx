@@ -5,7 +5,7 @@ import {
   ShieldAlert, RefreshCw, LogOut, FileText, Download, Users, 
   Map, HelpCircle, Activity, Search, Trash2, Plus, Edit3, 
   Upload, X, Check, Clipboard, Printer, AlertTriangle, ArrowUpDown, ChevronLeft, ChevronRight, Award, Eye,
-  Play, Pause, Square, Lock, Unlock, Settings, Database, AlertOctagon, MessageSquare, Volume2
+  Play, Pause, Square, Lock, Unlock, Settings, Database, AlertOctagon, MessageSquare, Volume2, Trophy, Clock
 } from 'lucide-react';
 import { 
   collection, doc, onSnapshot, getDocs, getDoc, addDoc, updateDoc, deleteDoc, 
@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db, firebaseConfig } from '../firebase/config';
 import { initializeApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
+import { getAuth, createUserWithEmailAndPassword, connectAuthEmulator } from 'firebase/auth';
 import toast from 'react-hot-toast';
 import QRCode from 'qrcode';
 
@@ -72,6 +72,8 @@ export default function AdminDashboard() {
   const [bonusTimeInput, setBonusTimeInput] = useState(10);
   const [penaltyTimeInput, setPenaltyTimeInput] = useState(5);
   const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [broadcastHintText, setBroadcastHintText] = useState('');
+  const [selectedBroadcastRoute, setSelectedBroadcastRoute] = useState('route_a');
 
   const safeTimestampToInputString = (ts) => {
     if (!ts) return '';
@@ -215,9 +217,20 @@ export default function AdminDashboard() {
     const teamList = [...teams];
     const sortKey = (t) => {
       const elapsed = calculateElapsedSeconds(t);
-      if (t.status === 'finished') return [0, elapsed, t.team_name];
-      if (t.status === 'active') return [1, -(t.current_sequence || 1), t.start_time?.seconds || 0];
-      return [2, 0, t.team_name];
+      if (t.route_id === 'championship') {
+        if (t.status === 'finished' || t.is_grand_winner) {
+          return [0, elapsed, t.team_name];
+        }
+        return [1, -(t.current_sequence || 1), elapsed];
+      } else {
+        if (t.is_qualifying_winner || t.status === 'finished') {
+          return [2, elapsed, t.team_name];
+        }
+        if (t.status === 'active') {
+          return [3, -(t.current_sequence || 1), t.start_time?.seconds || 0];
+        }
+        return [4, 0, t.team_name];
+      }
     };
     return teamList.sort((a, b) => {
       const ka = sortKey(a);
@@ -275,11 +288,13 @@ export default function AdminDashboard() {
 
     await setDoc(doc(db, 'leaderboard', teamId), {
       team_name: teamData.team_name,
+      college_name: teamData.college_name || "",
       status: teamData.status,
       current_sequence: teamData.current_sequence || 1,
       elapsed_seconds: elapsedSeconds,
       hints_used: teamData.hints_used || 0,
-      finish_time: teamData.finish_time || null
+      finish_time: teamData.finish_time || null,
+      route_id: teamData.route_id || ""
     }, { merge: true });
   };
 
@@ -298,10 +313,11 @@ export default function AdminDashboard() {
 
       if (action === 'start') {
         await updateDoc(eventRef, {
-          status: 'running',
-          event_start: serverTimestamp()
+          status: 'qualifying',
+          event_start: serverTimestamp(),
+          current_round: 1
         });
-        await logAuditLocal('event_control', adminUser, ip, null, 'Admin launched the event.');
+        await logAuditLocal('event_control', adminUser, ip, null, 'Admin launched the event qualifying round.');
       } else if (action === 'pause') {
         await updateDoc(eventRef, {
           status: 'paused',
@@ -324,9 +340,10 @@ export default function AdminDashboard() {
         const pauseStart = eventData.paused_at ? (eventData.paused_at.toMillis ? eventData.paused_at.toMillis() : eventData.paused_at.seconds * 1000) : Date.now();
         const pauseDur = Math.floor((Date.now() - pauseStart) / 1000);
         const prevPause = eventData.total_paused_duration_seconds || 0;
+        const nextStatus = eventData.current_round === 2 ? 'championship' : 'qualifying';
 
         await updateDoc(eventRef, {
-          status: 'running',
+          status: nextStatus,
           paused_at: null,
           total_paused_duration_seconds: prevPause + pauseDur
         });
@@ -361,6 +378,23 @@ export default function AdminDashboard() {
         });
         await batch.commit();
         await logAuditLocal('event_control', adminUser, ip, null, 'Event marked as completed. All active team timers stopped.');
+      } else if (action === 'timeout') {
+        if (!window.confirm('Are you sure you want to trigger Timeout? This stops all scans.')) return;
+        await updateDoc(eventRef, {
+          status: 'timeout',
+          event_end: serverTimestamp()
+        });
+
+        const batch = writeBatch(db);
+        const activeOrPausedTeams = teams.filter(t => ['active', 'paused'].includes(t.status));
+        activeOrPausedTeams.forEach(t => {
+          batch.update(doc(db, 'teams', t.id), {
+            status: 'finished',
+            finish_time: serverTimestamp()
+          });
+        });
+        await batch.commit();
+        await logAuditLocal('event_control', adminUser, ip, null, 'Event marked as timed out. All active team timers stopped.');
       } else if (action === 'lock_scans') {
         await updateDoc(eventRef, { scans_locked: true });
         await logAuditLocal('event_control', adminUser, ip, null, 'Locked scans globally.');
@@ -396,7 +430,22 @@ export default function AdminDashboard() {
             bonus_time_minutes: 0,
             hints_used: 0,
             total_paused_duration_seconds: 0,
-            paused_at: null
+            paused_at: null,
+            is_qualifying_winner: false,
+            round: 1,
+            route_id: t.original_route_id || t.route_id
+          });
+        });
+        await batch.commit();
+
+        // Reset Route Winners & Broadcast Hints
+        batch = writeBatch(db);
+        routes.forEach(r => {
+          batch.update(doc(db, 'routes', r.id), {
+            winner_team_id: "",
+            winner_team_name: "",
+            winner_finish_time: null,
+            broadcast_hint: ""
           });
         });
         await batch.commit();
@@ -408,7 +457,11 @@ export default function AdminDashboard() {
 
         await updateDoc(eventRef, {
           paused_at: null,
-          total_paused_duration_seconds: 0
+          total_paused_duration_seconds: 0,
+          current_round: 1,
+          championship_started: false,
+          championship_winner_id: "",
+          championship_winner_name: ""
         });
         await logAuditLocal('event_control', adminUser, ip, null, 'Soft reset completed. Wiped logs and progress.');
       } else if (action === 'full_reset') {
@@ -513,6 +566,108 @@ export default function AdminDashboard() {
     } catch (err) {
       toast.dismiss();
       toast.error(err.message || 'Override failed.');
+    }
+  };
+
+  const handleAdvanceToChampionship = async () => {
+    // Find qualifying winners (those with is_qualifying_winner === true)
+    const winners = teams.filter(t => t.is_qualifying_winner === true);
+    if (winners.length === 0) {
+      toast.error("No route winners qualified yet! Block winners must complete first.");
+      return;
+    }
+    if (!window.confirm(`Are you sure you want to advance the following ${winners.length} teams to the Championship Round: ${winners.map(w => w.team_name).join(', ')}?`)) {
+      return;
+    }
+    
+    try {
+      toast.loading('Starting Championship Round...');
+      const batch = writeBatch(db);
+      
+      // Update active event status
+      const eventRef = doc(db, 'events', 'active_event');
+      batch.update(eventRef, {
+        current_round: 2,
+        championship_started: true,
+        championship_winner_id: "",
+        championship_winner_name: ""
+      });
+      
+      // Promote finalists
+      winners.forEach(w => {
+        const teamRef = doc(db, 'teams', w.id);
+        batch.update(teamRef, {
+          route_id: 'championship',
+          current_sequence: 1,
+          status: 'active',
+          start_time: serverTimestamp(),
+          round: 2,
+          hints_used: 0,
+          bonus_time_minutes: 0,
+          time_penalty_minutes: 0,
+          finish_time: null,
+          is_grand_winner: false
+        });
+        
+        const leaderboardRef = doc(db, 'leaderboard', w.id);
+        batch.set(leaderboardRef, {
+          team_name: w.team_name,
+          college_name: w.college_name || "",
+          route_id: 'championship',
+          current_sequence: 1,
+          status: 'active',
+          elapsed_seconds: 0,
+          hints_used: 0,
+          finish_time: null,
+          is_grand_winner: false
+        }, { merge: true });
+      });
+      
+      await batch.commit();
+      toast.dismiss();
+      toast.success('Championship Round active! Finalists promoted.');
+      await logAuditLocal('start_championship', 'admin', '127.0.0.1', null, `Admin started the Championship Round with ${winners.length} finalists.`);
+    } catch (err) {
+      toast.dismiss();
+      toast.error(err.message || 'Promotion failed.');
+    }
+  };
+
+  const handleBroadcastHint = async (e) => {
+    e.preventDefault();
+    if (!broadcastHintText.trim()) {
+      toast.error("Please enter a hint message.");
+      return;
+    }
+    try {
+      toast.loading(`Broadcasting hint...`);
+      const routeRef = doc(db, 'routes', selectedBroadcastRoute);
+      await updateDoc(routeRef, {
+        broadcast_hint: broadcastHintText.trim()
+      });
+      toast.dismiss();
+      toast.success(`Hint broadcasted to ${getRouteName(selectedBroadcastRoute)}.`);
+      await logAuditLocal('broadcast_hint', 'admin', '127.0.0.1', null, `Admin broadcasted hint to route ${selectedBroadcastRoute}: "${broadcastHintText}"`);
+      setBroadcastHintText('');
+    } catch (err) {
+      toast.dismiss();
+      toast.error('Failed to broadcast hint.');
+    }
+  };
+
+  const handleClearBroadcast = async (routeId) => {
+    try {
+      toast.loading('Clearing broadcast...');
+      const routeRef = doc(db, 'routes', routeId);
+      await updateDoc(routeRef, {
+        broadcast_hint: ""
+      });
+      toast.dismiss();
+      toast.success(`Cleared hint for ${getRouteName(routeId)}.`);
+      await logAuditLocal('clear_broadcast', 'admin', '127.0.0.1', null, `Admin cleared broadcast hint for route ${routeId}`);
+    } catch (err) {
+      toast.dismiss();
+      toast.error('Failed to clear broadcast.');
     }
   };
 
@@ -835,6 +990,9 @@ export default function AdminDashboard() {
         
         const secondaryApp = initializeApp(firebaseConfig, 'SecondaryApp');
         const secondaryAuth = getAuth(secondaryApp);
+        if (import.meta.env.VITE_USE_EMULATORS === 'true' || (import.meta.env.DEV && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))) {
+          connectAuthEmulator(secondaryAuth, 'http://127.0.0.1:9099', { disableWarnings: true });
+        }
         try {
           const userCred = await createUserWithEmailAndPassword(
             secondaryAuth,
@@ -1245,6 +1403,115 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
+              {/* TOURNAMENT & BROADCAST CONTROL PANEL */}
+              <div className="grid md:grid-cols-2 gap-6">
+                {/* 1. Championship Round Advancement Control */}
+                <div className="glass-card p-6 rounded-3xl border border-slate-900 text-left flex flex-col justify-between">
+                  <div>
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-sm font-bold uppercase tracking-wider text-slate-200 flex items-center gap-2">
+                        🏆 Championship Control (Round 2)
+                      </h3>
+                      <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                        eventData?.current_round === 2 ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                      }`}>
+                        {eventData?.current_round === 2 ? 'Championship Active' : 'Round 1 (Qualifying)'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+                      {eventData?.current_round === 2 
+                        ? "The Championship Round is currently active. The 3 finalists are hunting for the championship QRs."
+                        : "Once Route Winners are determined for Route A, B, and C, click the button below to promote the 3 finalists and start the Championship Round."
+                      }
+                    </p>
+                    
+                    {/* Live winners list */}
+                    <div className="space-y-2 mb-4 bg-slate-950/40 p-4 rounded-2xl border border-slate-900">
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Route / Block Winners:</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {['route_a', 'route_b', 'route_c'].map(rId => {
+                          const route = routes.find(r => r.id === rId);
+                          const winnerName = route?.winner_team_name;
+                          return (
+                            <div key={rId} className="p-2 bg-slate-900/60 border border-slate-800 rounded-xl flex flex-col">
+                              <span className="text-[9px] text-slate-500 font-bold uppercase">{rId === 'route_a' ? 'Block A' : rId === 'route_b' ? 'Block B' : 'Block C'}</span>
+                              <span className={`text-[11px] font-extrabold truncate mt-0.5 ${winnerName ? 'text-green-400' : 'text-slate-500 italic'}`}>
+                                {winnerName || 'No Winner Yet'}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {eventData?.current_round !== 2 && (
+                    <button
+                      onClick={handleAdvanceToChampionship}
+                      disabled={teams.filter(t => t.is_qualifying_winner === true).length === 0}
+                      className="w-full py-3 bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 font-bold rounded-2xl text-slate-950 transition-all shadow-lg hover:shadow-yellow-500/10 flex items-center justify-center gap-2 text-xs disabled:opacity-40 disabled:pointer-events-none"
+                    >
+                      <Trophy className="w-4 h-4" /> Start Championship Round
+                    </button>
+                  )}
+                  {eventData?.current_round === 2 && (
+                    <div className="p-3 bg-yellow-500/5 border border-yellow-500/10 rounded-2xl text-center text-[11px] text-yellow-400 font-bold uppercase tracking-wide">
+                      🏁 Finals in Progress!
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Admin Broadcast Hint Control */}
+                <div className="glass-card p-6 rounded-3xl border border-slate-900 text-left flex flex-col justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-200 mb-4 flex items-center gap-2">
+                      📢 Broadcast Clue Hints
+                    </h3>
+                    <form onSubmit={handleBroadcastHint} className="space-y-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Target Route</label>
+                        <select 
+                          value={selectedBroadcastRoute} 
+                          onChange={(e) => setSelectedBroadcastRoute(e.target.value)} 
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-900 text-xs text-slate-300 outline-none rounded-xl"
+                        >
+                          {routes.map(r => (
+                            <option key={r.id} value={r.id}>{r.name} {r.broadcast_hint ? '💬' : ''}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Hint Message / Announcement</label>
+                        <input 
+                          type="text" 
+                          placeholder="e.g. Look under the bench near the entrance..."
+                          value={broadcastHintText} 
+                          onChange={(e) => setBroadcastHintText(e.target.value)} 
+                          className="w-full px-4 py-2 bg-slate-950 border border-slate-900 text-slate-100 outline-none text-xs focus:border-purple-500 transition-colors rounded-xl"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          type="submit" 
+                          className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-purple-500/10"
+                        >
+                          Broadcast Hint
+                        </button>
+                        {routes.find(r => r.id === selectedBroadcastRoute)?.broadcast_hint && (
+                          <button 
+                            type="button"
+                            onClick={() => handleClearBroadcast(selectedBroadcastRoute)}
+                            className="px-4 py-2.5 bg-red-950/20 border border-red-500/10 hover:bg-red-950/30 text-red-400 font-bold rounded-xl text-xs transition-all"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              </div>
+
               {/* Leaderboard & Recent Scans */}
               <div className="grid lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 glass-card p-6 rounded-3xl border border-slate-900 text-left">
@@ -1575,8 +1842,12 @@ export default function AdminDashboard() {
                             <option value="registration_closed">Registration Closed</option>
                             <option value="ready">Ready</option>
                             <option value="running">Running</option>
+                            <option value="qualifying">Qualifying Round</option>
+                            <option value="waiting_championship">Waiting for Championship</option>
+                            <option value="championship">Championship Round</option>
                             <option value="paused">Paused</option>
                             <option value="completed">Completed</option>
+                            <option value="timeout">Timed Out (Timeout)</option>
                             <option value="archived">Archived</option>
                           </select>
                         </div>
@@ -1585,7 +1856,7 @@ export default function AdminDashboard() {
                     </form>
                   </div>
                 </div>
-
+ 
                 {/* Event Actions & Selected Team Controls */}
                 <div className="space-y-6 text-left">
                   <div className="glass-card p-6 rounded-3xl border border-slate-900 space-y-4">
@@ -1594,7 +1865,7 @@ export default function AdminDashboard() {
                     </h3>
                     
                     <div className="grid grid-cols-2 gap-3">
-                      {eventConfig.status !== 'running' ? (
+                      {!['running', 'qualifying', 'championship'].includes(eventConfig.status) ? (
                         <button onClick={() => triggerEventAction('start')} className="flex items-center justify-center gap-2 py-3 rounded-xl bg-green-600 hover:bg-green-500 text-white text-xs font-bold transition-all"><Play className="w-4 h-4" /> Start Event</button>
                       ) : (
                         <button onClick={() => triggerEventAction('pause')} className="flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all"><Pause className="w-4 h-4" /> Pause Event</button>
@@ -1603,8 +1874,10 @@ export default function AdminDashboard() {
                       {eventConfig.status === 'paused' && (
                         <button onClick={() => triggerEventAction('resume')} className="flex items-center justify-center gap-2 py-3 rounded-xl bg-green-600 hover:bg-green-500 text-white text-xs font-bold transition-all animate-pulse"><Play className="w-4 h-4" /> Resume Event</button>
                       )}
-
+ 
                       <button onClick={() => triggerEventAction('end')} disabled={eventConfig.status === 'completed'} className="flex items-center justify-center gap-2 py-3 rounded-xl bg-red-650/10 border border-red-500/20 text-red-400 hover:bg-red-650 hover:text-white disabled:opacity-50 disabled:hover:bg-red-650/10 disabled:hover:text-red-400 text-xs font-bold transition-all"><Square className="w-4 h-4" /> End Event</button>
+                      
+                      <button onClick={() => triggerEventAction('timeout')} disabled={eventConfig.status === 'timeout'} className="flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-600/10 border border-amber-500/20 text-amber-400 hover:bg-amber-600 hover:text-white disabled:opacity-50 disabled:hover:bg-amber-600/10 disabled:hover:text-amber-400 text-xs font-bold transition-all"><Clock className="w-4 h-4" /> Timeout Event</button>
 
                       {eventConfig.scans_locked ? (
                         <button onClick={() => triggerEventAction('unlock_scans')} className="flex items-center justify-center gap-2 py-3 rounded-xl bg-green-600 hover:bg-green-500 text-white text-xs font-bold transition-all"><Unlock className="w-4 h-4" /> Unlock Scans</button>

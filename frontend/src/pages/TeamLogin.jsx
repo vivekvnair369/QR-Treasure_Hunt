@@ -30,7 +30,7 @@ export default function TeamLogin() {
     setLoading(false);
 
     if (res.success) {
-      toast.success(`Welcome ${res.team.team_name}!`);
+      toast.success('Welcome to the Hunt!');
       navigate('/dashboard');
     } else {
       toast.error(res.error || 'Invalid Team Code.');
