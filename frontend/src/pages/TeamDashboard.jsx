@@ -930,7 +930,7 @@ export default function TeamDashboard() {
                       <span className="text-lg">📢</span>
                       <div className="text-left">
                         <p className="text-[9px] text-purple-400 font-bold uppercase tracking-widest mb-0.5">ADMIN BROADCAST HINT</p>
-                        <p className="italic text-slate-200 font-medium">"{team?.broadcast_hint || routeInfo.broadcast_hint}"</p>
+                        <p className="italic text-slate-200 font-medium">"{team?.broadcast_hint || routeInfo?.broadcast_hint}"</p>
                       </div>
                     </div>
                   )}
