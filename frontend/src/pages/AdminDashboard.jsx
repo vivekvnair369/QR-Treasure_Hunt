@@ -99,6 +99,35 @@ export default function AdminDashboard() {
     return '';
   };
 
+  const safeFormatTime = (ts, showDate = false) => {
+    if (!ts) return 'Just now';
+    try {
+      let date;
+      if (ts && typeof ts.toDate === 'function') {
+        date = ts.toDate();
+      } else if (ts && typeof ts.seconds === 'number') {
+        date = new Date(ts.seconds * 1000);
+      } else if (ts instanceof Date) {
+        date = ts;
+      } else if (typeof ts === 'string' || typeof ts === 'number') {
+        date = new Date(ts);
+      } else {
+        return 'Just now';
+      }
+      
+      if (isNaN(date.getTime())) {
+        return 'Just now';
+      }
+      
+      if (showDate) {
+        return date.toLocaleString();
+      }
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch (e) {
+      return 'Just now';
+    }
+  };
+
   // Trigger full-screen confetti when a grand champion is declared
   useEffect(() => {
     if (eventData?.championship_winner_id) {
@@ -1175,7 +1204,7 @@ export default function AdminDashboard() {
     try {
       let csv = 'Action,Performed By,Timestamp,IP Address,Affected Team,Details\n';
       auditLogs.forEach(d => {
-        const t = d.timestamp ? new Date(d.timestamp.seconds * 1000).toLocaleString() : '';
+        const t = safeFormatTime(d.timestamp, true);
         csv += `"${d.action_type || ''}","${d.performed_by || ''}","${t}","${d.ip_address || ''}","${d.affected_team || ''}","${(d.details || '').replace(/"/g, '""')}"\n`;
       });
       const blob = new Blob([csv], { type: 'text/csv' });
@@ -1193,7 +1222,7 @@ export default function AdminDashboard() {
     try {
       let csv = 'Team,QR ID,Status,Timestamp,Device,IP Address\n';
       scanLogs.forEach(d => {
-        const t = d.timestamp ? new Date(d.timestamp.seconds * 1000).toLocaleString() : '';
+        const t = safeFormatTime(d.timestamp, true);
         csv += `"${d.team_name || ''}","${d.qr_id || ''}","${d.status || ''}","${t}","${d.device || ''}","${d.ip_address || ''}"\n`;
       });
       const blob = new Blob([csv], { type: 'text/csv' });
@@ -2001,7 +2030,7 @@ export default function AdminDashboard() {
                         </div>
                         <div className="flex justify-between items-center text-slate-500">
                           <span>QR: {log.qr_id}</span>
-                          <span>{log.timestamp ? new Date(log.timestamp.seconds * 1000).toLocaleTimeString() : ''}</span>
+                          <span>{safeFormatTime(log.timestamp)}</span>
                         </div>
                       </div>
                     ))}
@@ -2054,9 +2083,7 @@ export default function AdminDashboard() {
                             }
                           }
 
-                          const timeStr = b.timestamp
-                            ? new Date(b.timestamp.seconds ? b.timestamp.seconds * 1000 : b.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-                            : 'Just now';
+                          const timeStr = safeFormatTime(b.timestamp);
 
                           return (
                             <tr key={b.id} className="hover:bg-slate-950/20">
@@ -2512,7 +2539,7 @@ export default function AdminDashboard() {
                           <span className="text-slate-300 font-semibold">{log.details}</span>
                         </div>
                         <div className="text-right text-[10px] text-slate-500 font-mono">
-                          {log.performed_by} • IP: {log.ip_address || '-'} • {log.timestamp ? new Date(log.timestamp.seconds * 1000).toLocaleString() : ''}
+                          {log.performed_by} • IP: {log.ip_address || '-'} • {safeFormatTime(log.timestamp, true)}
                         </div>
                       </div>
                     ))
