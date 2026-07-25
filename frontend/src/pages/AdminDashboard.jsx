@@ -1457,6 +1457,25 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleCreateChampionshipRoute = async () => {
+    toast.loading('Creating Championship Route...');
+    try {
+      await setDoc(doc(db, 'routes', 'championship'), {
+        name: "Championship Route",
+        winner_team_id: "",
+        winner_team_name: "",
+        winner_finish_time: null,
+        broadcast_hint: ""
+      });
+      toast.dismiss();
+      toast.success('Championship Route configured successfully!');
+    } catch (err) {
+      toast.dismiss();
+      console.error(err);
+      toast.error('Failed to configure Championship Route.');
+    }
+  };
+
   // CRUD Team
   const saveTeam = async (e) => {
     e.preventDefault();
@@ -2237,6 +2256,40 @@ export default function AdminDashboard() {
               <div className="flex justify-between items-center">
                 <button onClick={() => { setRouteForm({ id: null, name: '' }); setShowRouteModal(true); }} className="px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-purple-500/15"><Plus className="w-4 h-4" /> Create Route</button>
                 <button onClick={() => setShowGenerateModal(true)} className="px-4 py-2.5 bg-slate-900 border border-slate-800 text-slate-300 rounded-xl hover:text-purple-400 text-xs font-bold transition-all">Bulk Generate Routes</button>
+              </div>
+
+              {/* Championship Route Status Card */}
+              <div className="glass-card p-6 rounded-3xl border border-slate-900 text-left space-y-3">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                      🏆 Championship Route Configuration
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {routes.some(r => r.id === 'championship')
+                        ? "Configured: The Championship Route document is active in your database."
+                        : "Not Configured: The Championship Route document is missing from your database."
+                      }
+                    </p>
+                  </div>
+                  {routes.some(r => r.id === 'championship') ? (
+                    <span className="px-3 py-1 bg-green-500/10 border border-green-500/20 text-green-400 rounded-xl text-[10px] font-black uppercase">
+                      ✅ Configured
+                    </span>
+                  ) : (
+                    <button 
+                      onClick={handleCreateChampionshipRoute}
+                      className="px-4 py-2 bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-md shadow-yellow-500/10"
+                    >
+                      ⚡ Restore Championship Route
+                    </button>
+                  )}
+                </div>
+                {routes.some(r => r.id === 'championship') && (
+                  <p className="text-[10px] text-slate-500 italic">
+                    💡 Note: The Championship Route is automatically connected to the game progression. When you advance the qualifying winners, the system will route them to the Championship Route. You can rename it or delete it in the list below.
+                  </p>
+                )}
               </div>
 
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
