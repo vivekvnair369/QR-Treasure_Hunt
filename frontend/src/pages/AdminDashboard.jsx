@@ -1400,6 +1400,63 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleGenerateChampionshipClues = async () => {
+    toast.loading('Generating championship clues...');
+    try {
+      const batch = writeBatch(db);
+      
+      // Ensure championship route exists
+      const routeRef = doc(db, 'routes', 'championship');
+      batch.set(routeRef, { 
+        name: "Championship Route", 
+        winner_team_id: "", 
+        winner_team_name: "", 
+        winner_finish_time: null, 
+        broadcast_hint: "" 
+      }, { merge: true });
+
+      const defaultChampClues = [
+        { location_name: 'Admin Block Plaza', clue_text: 'Where the national flag flies high and proud, in front of the main building\'s crowd.', answer: 'Admin Block Plaza', hint: 'Main Flagpole' },
+        { location_name: 'College Ground', clue_text: 'Where green grass grows and athletes run, playing football or cricket in the sun.', answer: 'College Ground', hint: 'Sports Field Pavilion' },
+        { location_name: 'Auditorium', clue_text: 'The final hall where winners are crowned, where the loudest cheers and applause resound.', answer: 'Auditorium', hint: 'Main Auditorium Building' }
+      ];
+
+      let seq = 1;
+      for (const clue of defaultChampClues) {
+        const cId = `clue_championship_${seq}`;
+        const qrId = `qr_championship_${seq}`;
+        const secret = `secret_championship_${seq}`;
+
+        batch.set(doc(db, 'qrCodes', qrId), {
+          qr_id: qrId,
+          clue_id: cId,
+          secret_token: secret
+        });
+
+        batch.set(doc(db, 'clues', cId), {
+          route_id: 'championship',
+          sequence: seq,
+          clue_text: clue.clue_text,
+          answer: clue.answer,
+          hint: clue.hint,
+          location_name: clue.location_name,
+          qr_id: qrId,
+          enabled: true,
+          placement_status: 'placed'
+        });
+        seq++;
+      }
+
+      await batch.commit();
+      toast.dismiss();
+      toast.success('Championship clues generated successfully!');
+    } catch (err) {
+      toast.dismiss();
+      console.error(err);
+      toast.error('Failed to generate championship clues.');
+    }
+  };
+
   // CRUD Team
   const saveTeam = async (e) => {
     e.preventDefault();
@@ -2210,6 +2267,40 @@ export default function AdminDashboard() {
             <div className="space-y-6">
               <div className="flex justify-between items-center">
                 <button onClick={() => { setClueForm({ id: null, route_id: '', sequence: '', clue_text: '', answer: '', hint: '', location_name: '', enabled: true }); setShowClueModal(true); }} className="px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-purple-500/15"><Plus className="w-4 h-4" /> Add QR Clue</button>
+              </div>
+
+              {/* Championship Clues status card */}
+              <div className="glass-card p-6 rounded-3xl border border-slate-900 text-left space-y-3">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                      🏆 Championship Round Clues Status
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {clues.some(c => c.route_id === 'championship')
+                        ? `Configured: ${clues.filter(c => c.route_id === 'championship').length} clues are active on the championship route.` 
+                        : "Not Configured: There are no clues assigned to the Championship route yet."
+                      }
+                    </p>
+                  </div>
+                  {clues.some(c => c.route_id === 'championship') ? (
+                    <span className="px-3 py-1 bg-green-500/10 border border-green-500/20 text-green-400 rounded-xl text-[10px] font-black uppercase">
+                      ✅ Configured
+                    </span>
+                  ) : (
+                    <button 
+                      onClick={handleGenerateChampionshipClues}
+                      className="px-4 py-2 bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-md shadow-yellow-500/10"
+                    >
+                      ⚡ Auto-Generate Default Clues
+                    </button>
+                  )}
+                </div>
+                {clues.some(c => c.route_id === 'championship') && (
+                  <p className="text-[10px] text-slate-500 italic">
+                    💡 Note: To modify or append more clues, click "Add QR Clue" above and select "Championship Route" in the dropdown, or edit/delete existing ones from the list below.
+                  </p>
+                )}
               </div>
 
               <div className="glass-card rounded-3xl border border-slate-900 overflow-hidden text-left">
