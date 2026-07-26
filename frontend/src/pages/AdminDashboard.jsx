@@ -845,9 +845,12 @@ export default function AdminDashboard() {
       const eventRef = doc(db, 'events', 'active_event');
       batch.update(eventRef, {
         current_round: 2,
+        status: 'championship',
         championship_started: true,
         championship_winner_id: "",
-        championship_winner_name: ""
+        championship_winner_name: "",
+        event_start: serverTimestamp(),
+        total_paused_duration_seconds: 0
       });
       
       // Promote finalists
