@@ -108,10 +108,10 @@ export default function Scanner() {
     const totalClues = cluesQuerySnap.size || 3;
 
     const targetSeq = clueData.sequence;
-    const expectedTargetSeq = currentSeq < totalClues ? currentSeq + 1 : 1;
+    const expectedTargetSeq = currentSeq;
 
     if (targetSeq !== expectedTargetSeq) {
-      const isAlreadyScanned = currentSeq > 1 && (targetSeq !== 1 && targetSeq <= currentSeq);
+      const isAlreadyScanned = targetSeq < currentSeq;
       
       if (isAlreadyScanned) {
         return { status: 'already_scanned', message: 'You have already solved this checkpoint.', clue: { id: qrData.clue_id, ...clueData } };
@@ -429,7 +429,7 @@ export default function Scanner() {
   const getScannerProgress = () => {
     if (!verifiedClue) return { progress: 0, completed: 0, total: 3 };
     const total = verifiedClue.totalClues || 3;
-    const completed = verifiedClue.sequence === 1 ? total : Math.max(0, verifiedClue.sequence - 1);
+    const completed = verifiedClue.sequence === total ? total : Math.max(0, verifiedClue.sequence - 1);
     const progress = Math.round((completed / total) * 100);
     return { progress, completed, total };
   };
