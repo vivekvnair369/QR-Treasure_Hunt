@@ -61,12 +61,14 @@ export default function TeamDashboard() {
           const snap = await getDocs(q);
           const totalClues = snap.size || 3;
           
+          const startProgress = Math.round((1 / totalClues) * 100);
+
           await updateDoc(teamRef, {
             status: 'active',
             start_time: serverTimestamp(),
-            current_sequence: 1,
-            progress_percent: 0,
-            completed_clues: 0,
+            current_sequence: 2,
+            progress_percent: startProgress,
+            completed_clues: 1,
             total_clues: totalClues
           });
 
@@ -74,15 +76,15 @@ export default function TeamDashboard() {
             team_name: team.team_name,
             college_name: team.college_name || "",
             status: 'active',
-            current_sequence: 1,
+            current_sequence: 2,
             elapsed_seconds: 0,
             hints_used: 0,
             finish_time: null,
             is_qualifying_winner: false,
             is_grand_winner: false,
             route_id: team.route_id,
-            progress_percent: 0,
-            completed_clues: 0,
+            progress_percent: startProgress,
+            completed_clues: 1,
             total_clues: totalClues
           }, { merge: true });
         } catch (err) {
