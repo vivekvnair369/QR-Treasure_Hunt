@@ -291,8 +291,7 @@ export default function AdminDashboard() {
   const getTeamProgressPercent = (t) => {
     if (!t) return 0;
     if (t.status === 'finished' || t.status === 'completed') return 100;
-    const routeClues = clues.filter(c => c.route_id === t.route_id);
-    const total = routeClues.length || 3;
+    const total = t.total_clues || 3;
     const completed = Math.max(0, (t.current_sequence || 1) - 1);
     return (completed / total) * 100;
   };
@@ -414,7 +413,7 @@ export default function AdminDashboard() {
         
         registeredTeams.forEach(t => {
           const teamClues = clues.filter(c => c.route_id === t.route_id);
-          const totalClues = teamClues.length || 3;
+          const totalClues = Math.min(teamClues.length || 3, eventConfig.num_clues_per_route || 3);
 
           const startProgress = Math.round((1 / totalClues) * 100);
 
@@ -2124,7 +2123,7 @@ export default function AdminDashboard() {
                             <td className="py-3 text-slate-400">
                               <div>Clue {team.status === 'finished' ? 'Finished' : (team.current_sequence || 1)}</div>
                               <div className="text-[10px] text-purple-400 font-bold">
-                                {Math.round(getTeamProgressPercent(team))}% ({team.status === 'finished' ? (clues.filter(c => c.route_id === team.route_id).length || 3) : Math.max(0, (team.current_sequence || 1) - 1)} / {clues.filter(c => c.route_id === team.route_id).length || 3})
+                                {Math.round(getTeamProgressPercent(team))}% ({team.status === 'finished' ? (team.total_clues || 3) : Math.max(0, (team.current_sequence || 1) - 1)} / {team.total_clues || 3})
                               </div>
                             </td>
                             <td className="py-3"><span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${team.status === 'finished' ? 'bg-green-500/10 text-green-400' : team.status === 'active' ? 'bg-purple-500/10 text-purple-400' : 'bg-slate-850 text-slate-400'}`}>{team.status}</span></td>
@@ -2272,7 +2271,7 @@ export default function AdminDashboard() {
                           <td className="py-4 px-6 text-slate-400">
                             <div>Sequence {t.status === 'finished' ? 'Finished' : (t.current_sequence || 1)}</div>
                             <div className="text-[10px] text-purple-400 font-bold">
-                              {Math.round(getTeamProgressPercent(t))}% ({t.status === 'finished' ? (clues.filter(c => c.route_id === t.route_id).length || 3) : Math.max(0, (t.current_sequence || 1) - 1)} / {clues.filter(c => c.route_id === t.route_id).length || 3})
+                              {Math.round(getTeamProgressPercent(t))}% ({t.status === 'finished' ? (t.total_clues || 3) : Math.max(0, (t.current_sequence || 1) - 1)} / {t.total_clues || 3})
                             </div>
                           </td>
                           <td className="py-4 px-6"><span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${t.status === 'finished' ? 'bg-green-500/10 text-green-400 border border-green-500/15' : t.status === 'active' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/15' : 'bg-slate-850 text-slate-400'}`}>{t.status}</span></td>
@@ -3018,7 +3017,7 @@ export default function AdminDashboard() {
                               <td className="py-3.5 px-6 font-bold text-slate-200">{team.team_name}</td>
                               <td className="py-3.5 px-6 font-mono text-slate-400">{team.status === 'finished' ? 'Finished' : `Clue ${team.current_sequence || 1}`}</td>
                               <td className="py-3.5 px-6 text-purple-400 font-bold">
-                                {Math.round(getTeamProgressPercent(team))}% ({team.status === 'finished' ? (clues.filter(c => c.route_id === team.route_id).length || 3) : Math.max(0, (team.current_sequence || 1) - 1)} / {clues.filter(c => c.route_id === team.route_id).length || 3})
+                                {Math.round(getTeamProgressPercent(team))}% ({team.status === 'finished' ? (team.total_clues || 3) : Math.max(0, (team.current_sequence || 1) - 1)} / {team.total_clues || 3})
                               </td>
                               <td className="py-3.5 px-6 text-right font-mono text-slate-300 pr-6">
                                 {team.status === 'finished' || team.status === 'active' ? `${Math.floor(calculateElapsedSeconds(team)/60)}m ${calculateElapsedSeconds(team)%60}s` : '-'}

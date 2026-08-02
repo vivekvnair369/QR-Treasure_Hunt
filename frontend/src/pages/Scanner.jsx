@@ -105,7 +105,7 @@ export default function Scanner() {
     const currentSeq = teamData.current_sequence;
 
     const cluesQuerySnap = await getDocs(query(collection(db, 'clues'), where('route_id', '==', teamData.route_id)));
-    const totalClues = cluesQuerySnap.size || 3;
+    const totalClues = Math.min(cluesQuerySnap.size || 3, eventData.num_clues_per_route || 3);
 
     const targetSeq = clueData.sequence;
     const expectedTargetSeq = currentSeq;

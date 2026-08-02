@@ -59,7 +59,7 @@ export default function TeamDashboard() {
           const teamRef = doc(db, 'teams', team.id);
           const q = query(collection(db, 'clues'), where('route_id', '==', team.route_id));
           const snap = await getDocs(q);
-          const totalClues = snap.size || 3;
+          const totalClues = Math.min(snap.size || 3, eventInfo?.num_clues_per_route || 3);
           
           const startProgress = Math.round((1 / totalClues) * 100);
 
@@ -988,15 +988,15 @@ export default function TeamDashboard() {
                 <div className="text-xs text-slate-400 font-bold space-y-1.5 pt-1">
                   <div className="flex justify-between text-purple-300 uppercase tracking-wider">
                     <span>Current:</span>
-                    <span>{team?.status === 'finished' ? 'Completed Route' : `Clue ${team?.current_sequence || 1} / ${routeCluesCount}`}</span>
+                    <span>{team?.status === 'finished' ? 'Completed Route' : `Clue ${team?.current_sequence || 1} / ${team?.total_clues || 3}`}</span>
                   </div>
                   <div className="flex justify-between text-slate-500 uppercase tracking-wider text-[10px]">
                     <span>Completed:</span>
-                    <span>{team?.status === 'finished' ? routeCluesCount : Math.max(0, (team?.current_sequence || 1) - 1)} / {routeCluesCount} Clues</span>
+                    <span>{team?.status === 'finished' ? (team?.total_clues || 3) : Math.max(0, (team?.current_sequence || 1) - 1)} / {team?.total_clues || 3} Clues</span>
                   </div>
                   <div className="flex justify-between text-pink-400 uppercase tracking-wider text-[10px]">
                     <span>Pending:</span>
-                    <span>{team?.status === 'finished' ? 0 : Math.max(0, routeCluesCount - (team?.current_sequence || 1) + 1)} Clue(s)</span>
+                    <span>{team?.status === 'finished' ? 0 : Math.max(0, (team?.total_clues || 3) - (team?.current_sequence || 1) + 1)} Clue(s)</span>
                   </div>
                 </div>
               </div>
