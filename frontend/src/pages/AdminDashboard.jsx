@@ -654,13 +654,14 @@ export default function AdminDashboard() {
         const finalists = teams.filter(t => t.route_id === 'championship' || t.is_finalist);
         const champClues = clues.filter(c => c.route_id === 'championship').sort((a, b) => (a.sequence || 1) - (b.sequence || 1));
         const firstClueId = champClues.length > 0 ? champClues[0].id : "";
-        const totalClues = champClues.length || 3;
+        const totalClues = Math.min(champClues.length || 3, eventConfig.num_clues_per_route || 3);
+        const startProgress = Math.round((1 / totalClues) * 100);
 
         finalists.forEach(t => {
           batch.update(doc(db, 'teams', t.id), {
             status: 'active',
             start_time: serverTimestamp(),
-            current_sequence: 1,
+            current_sequence: 2,
             completed: false,
             finish_time: null,
             finished_at: null,
@@ -669,8 +670,8 @@ export default function AdminDashboard() {
             paused_at: null,
             is_grand_winner: false,
             current_clue_id: firstClueId,
-            progress_percent: 0,
-            completed_clues: 0,
+            progress_percent: startProgress,
+            completed_clues: 1,
             total_clues: totalClues,
             broadcast_hint: "",
             broadcast_message: "",
@@ -684,13 +685,13 @@ export default function AdminDashboard() {
           
           batch.update(doc(db, 'leaderboard', t.id), {
             status: 'active',
-            current_sequence: 1,
+            current_sequence: 2,
             elapsed_seconds: 0,
             finish_time: null,
             is_grand_winner: false,
             route_id: 'championship',
-            progress_percent: 0,
-            completed_clues: 0,
+            progress_percent: startProgress,
+            completed_clues: 1,
             total_clues: totalClues
           });
         });
@@ -892,13 +893,14 @@ export default function AdminDashboard() {
       
       // Promote finalists
       const champClues = clues.filter(c => c.route_id === 'championship');
-      const totalChampClues = champClues.length || 3;
+      const totalChampClues = Math.min(champClues.length || 3, eventConfig.num_clues_per_route || 3);
+      const startProgress = Math.round((1 / totalChampClues) * 100);
 
       winners.forEach(w => {
         const teamRef = doc(db, 'teams', w.id);
         batch.update(teamRef, {
           route_id: 'championship',
-          current_sequence: 1,
+          current_sequence: 2,
           status: 'active',
           start_time: serverTimestamp(),
           round: 2,
@@ -907,8 +909,8 @@ export default function AdminDashboard() {
           time_penalty_minutes: 0,
           finish_time: null,
           is_grand_winner: false,
-          progress_percent: 0,
-          completed_clues: 0,
+          progress_percent: startProgress,
+          completed_clues: 1,
           total_clues: totalChampClues
         });
         
@@ -917,14 +919,14 @@ export default function AdminDashboard() {
           team_name: w.team_name,
           college_name: w.college_name || "",
           route_id: 'championship',
-          current_sequence: 1,
+          current_sequence: 2,
           status: 'active',
           elapsed_seconds: 0,
           hints_used: 0,
           finish_time: null,
           is_grand_winner: false,
-          progress_percent: 0,
-          completed_clues: 0,
+          progress_percent: startProgress,
+          completed_clues: 1,
           total_clues: totalChampClues
         }, { merge: true });
       });
