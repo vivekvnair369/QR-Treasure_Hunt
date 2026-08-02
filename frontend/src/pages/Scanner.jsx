@@ -129,12 +129,18 @@ export default function Scanner() {
       }
     }
 
-    const isFirstClue = false;
+    const isFirstClue = teamData.status === 'registered' || teamData.status === 'checked_in' || teamData.status === 'waiting';
     const isLastClue = currentSeq >= totalClues;
 
     const updates = {};
     let statusResult = 'success';
     const batch = writeBatch(db);
+
+    if (isFirstClue) {
+      updates.status = 'active';
+      updates.start_time = serverTimestamp();
+      statusResult = 'success';
+    }
 
     let auditDetails = `Team scanned checkpoint clue #${currentSeq}.`;
     let actionType = 'team_scan';
