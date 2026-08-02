@@ -102,39 +102,39 @@ export default function Scanner() {
       return { status: 'wrong_route', message: 'This QR does not belong to your assigned route.', clue: { id: qrData.clue_id, ...clueData } };
     }
 
-    const targetSeq = clueData.sequence;
     const currentSeq = teamData.current_sequence;
-
-    if (targetSeq < currentSeq) {
-      return { status: 'already_scanned', message: 'You have already solved this checkpoint.', clue: { id: qrData.clue_id, ...clueData } };
-    } else if (targetSeq > currentSeq) {
-      await addDoc(collection(db, 'scanLogs'), {
-        team_id: teamId,
-        team_name: teamData.team_name,
-        qr_id: qrId,
-        status: 'invalid_sequence',
-        timestamp: serverTimestamp(),
-        device: device || 'Unknown',
-        ip_address: '127.0.0.1'
-      });
-      return { status: 'invalid_sequence', message: 'Checkpoint scanned out of order.', clue: { id: qrData.clue_id, ...clueData } };
-    }
 
     const cluesQuerySnap = await getDocs(query(collection(db, 'clues'), where('route_id', '==', teamData.route_id)));
     const totalClues = cluesQuerySnap.size || 3;
 
-    const isFirstClue = currentSeq === 1 && (teamData.status === 'registered' || teamData.status === 'checked_in' || teamData.status === 'waiting');
+    const targetSeq = clueData.sequence;
+    const expectedTargetSeq = currentSeq < totalClues ? currentSeq + 1 : 1;
+
+    if (targetSeq !== expectedTargetSeq) {
+      const isAlreadyScanned = currentSeq > 1 && (targetSeq !== 1 && targetSeq <= currentSeq);
+      
+      if (isAlreadyScanned) {
+        return { status: 'already_scanned', message: 'You have already solved this checkpoint.', clue: { id: qrData.clue_id, ...clueData } };
+      } else {
+        await addDoc(collection(db, 'scanLogs'), {
+          team_id: teamId,
+          team_name: teamData.team_name,
+          qr_id: qrId,
+          status: 'invalid_sequence',
+          timestamp: serverTimestamp(),
+          device: device || 'Unknown',
+          ip_address: '127.0.0.1'
+        });
+        return { status: 'invalid_sequence', message: 'Checkpoint scanned out of order.', clue: { id: qrData.clue_id, ...clueData } };
+      }
+    }
+
+    const isFirstClue = false;
     const isLastClue = currentSeq >= totalClues;
 
     const updates = {};
     let statusResult = 'success';
     const batch = writeBatch(db);
-
-    if (isFirstClue) {
-      updates.status = 'active';
-      updates.start_time = serverTimestamp();
-      statusResult = 'success';
-    }
 
     let auditDetails = `Team scanned checkpoint clue #${currentSeq}.`;
     let actionType = 'team_scan';
