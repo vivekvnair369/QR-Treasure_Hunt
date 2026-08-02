@@ -429,7 +429,7 @@ export default function Scanner() {
   const getScannerProgress = () => {
     if (!verifiedClue) return { progress: 0, completed: 0, total: 3 };
     const total = verifiedClue.totalClues || 3;
-    const completed = verifiedClue.sequence || 1;
+    const completed = verifiedClue.sequence === 1 ? total : Math.max(0, verifiedClue.sequence - 1);
     const progress = Math.round((completed / total) * 100);
     return { progress, completed, total };
   };
