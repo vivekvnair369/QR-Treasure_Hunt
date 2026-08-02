@@ -983,9 +983,20 @@ export default function TeamDashboard() {
                     ></div>
                   </div>
                 </div>
-                <p className="text-xs text-slate-400 font-bold text-purple-300 uppercase tracking-wider">
-                  Completed: {team?.status === 'finished' ? routeCluesCount : Math.max(0, (team?.current_sequence || 1) - 1)} / {routeCluesCount} Clues
-                </p>
+                <div className="text-xs text-slate-400 font-bold space-y-1.5 pt-1">
+                  <div className="flex justify-between text-purple-300 uppercase tracking-wider">
+                    <span>Current:</span>
+                    <span>{team?.status === 'finished' ? 'Completed Route' : `Clue ${team?.current_sequence || 1} / ${routeCluesCount}`}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-500 uppercase tracking-wider text-[10px]">
+                    <span>Completed:</span>
+                    <span>{team?.status === 'finished' ? routeCluesCount : Math.max(0, (team?.current_sequence || 1) - 1)} / {routeCluesCount} Clues</span>
+                  </div>
+                  <div className="flex justify-between text-pink-400 uppercase tracking-wider text-[10px]">
+                    <span>Pending:</span>
+                    <span>{team?.status === 'finished' ? 0 : Math.max(0, routeCluesCount - (team?.current_sequence || 1) + 1)} Clue(s)</span>
+                  </div>
+                </div>
               </div>
             </div>
  
