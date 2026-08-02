@@ -6,7 +6,7 @@ import {
   CheckCircle2, XCircle, AlertCircle, Sparkles, Download, ArrowRight, Zap, RefreshCw
 } from 'lucide-react';
 import { 
-  doc, onSnapshot, query, collection, where, limit, updateDoc, addDoc, serverTimestamp 
+  doc, onSnapshot, query, collection, where, limit, updateDoc, addDoc, serverTimestamp, setDoc, getDocs 
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import toast from 'react-hot-toast';
@@ -45,6 +45,53 @@ export default function TeamDashboard() {
       unsubEvent();
     };
   }, []);
+
+  // Auto-activate team if event is already running and team is waiting/registered
+  useEffect(() => {
+    if (
+      eventInfo &&
+      ['qualifying', 'championship'].includes(eventInfo.status) &&
+      team &&
+      ['registered', 'checked_in', 'waiting'].includes(team.status)
+    ) {
+      const activateTeam = async () => {
+        try {
+          const teamRef = doc(db, 'teams', team.id);
+          const q = query(collection(db, 'clues'), where('route_id', '==', team.route_id));
+          const snap = await getDocs(q);
+          const totalClues = snap.size || 3;
+          
+          await updateDoc(teamRef, {
+            status: 'active',
+            start_time: serverTimestamp(),
+            current_sequence: 1,
+            progress_percent: 0,
+            completed_clues: 0,
+            total_clues: totalClues
+          });
+
+          await setDoc(doc(db, 'leaderboard', team.id), {
+            team_name: team.team_name,
+            college_name: team.college_name || "",
+            status: 'active',
+            current_sequence: 1,
+            elapsed_seconds: 0,
+            hints_used: 0,
+            finish_time: null,
+            is_qualifying_winner: false,
+            is_grand_winner: false,
+            route_id: team.route_id,
+            progress_percent: 0,
+            completed_clues: 0,
+            total_clues: totalClues
+          }, { merge: true });
+        } catch (err) {
+          console.error("Error auto-starting team:", err);
+        }
+      };
+      activateTeam();
+    }
+  }, [eventInfo, team?.status, team?.route_id]);
 
   // Subscribe to Route info (for broadcast hints and completion status)
   useEffect(() => {

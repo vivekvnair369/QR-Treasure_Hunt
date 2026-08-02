@@ -407,7 +407,43 @@ export default function AdminDashboard() {
           event_start: serverTimestamp(),
           current_round: 1
         });
-        await logAuditLocal('event_control', adminUser, ip, null, 'Admin launched the event qualifying round.');
+
+        // Auto-activate all registered, checked_in, or waiting teams
+        const batch = writeBatch(db);
+        const registeredTeams = teams.filter(t => ['registered', 'checked_in', 'waiting'].includes(t.status));
+        
+        registeredTeams.forEach(t => {
+          const teamClues = clues.filter(c => c.route_id === t.route_id);
+          const totalClues = teamClues.length || 3;
+
+          batch.update(doc(db, 'teams', t.id), {
+            status: 'active',
+            start_time: serverTimestamp(),
+            current_sequence: 1,
+            progress_percent: 0,
+            completed_clues: 0,
+            total_clues: totalClues
+          });
+
+          batch.set(doc(db, 'leaderboard', t.id), {
+            team_name: t.team_name,
+            college_name: t.college_name || "",
+            status: 'active',
+            current_sequence: 1,
+            elapsed_seconds: 0,
+            hints_used: 0,
+            finish_time: null,
+            is_qualifying_winner: false,
+            is_grand_winner: false,
+            route_id: t.route_id,
+            progress_percent: 0,
+            completed_clues: 0,
+            total_clues: totalClues
+          }, { merge: true });
+        });
+        await batch.commit();
+
+        await logAuditLocal('event_control', adminUser, ip, null, `Admin launched the event qualifying round and activated ${registeredTeams.length} teams.`);
       } else if (action === 'pause') {
         await updateDoc(eventRef, {
           status: 'paused',
