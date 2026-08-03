@@ -601,6 +601,7 @@ export default function AdminDashboard() {
             paused_at: null,
             round: 1,
             route_id: routeId,
+            original_route_id: null,
             progress_percent: 0,
             completed_clues: 0,
             total_clues: totalClues
@@ -646,6 +647,7 @@ export default function AdminDashboard() {
             is_qualifying_winner: false,
             is_grand_winner: false,
             route_id: routeId,
+            original_route_id: null,
             progress_percent: 0,
             completed_clues: 0,
             total_clues: totalClues
@@ -936,6 +938,7 @@ export default function AdminDashboard() {
         const teamRef = doc(db, 'teams', w.id);
         batch.update(teamRef, {
           route_id: 'championship',
+          original_route_id: w.route_id,
           current_sequence: 2,
           status: 'active',
           start_time: serverTimestamp(),
@@ -955,6 +958,7 @@ export default function AdminDashboard() {
           team_name: w.team_name,
           college_name: w.college_name || "",
           route_id: 'championship',
+          original_route_id: w.route_id,
           current_sequence: 2,
           status: 'active',
           elapsed_seconds: 0,
