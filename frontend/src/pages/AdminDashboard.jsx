@@ -618,6 +618,11 @@ export default function AdminDashboard() {
             current_hint: "",
             broadcast_hint: "",
             broadcast_message: "",
+            broadcast_hint_auto_hide: false,
+            broadcast_message_auto_hide: false,
+            broadcast_hint_hide_at: null,
+            broadcast_message_hide_at: null,
+            broadcast_hint_updated_at: null,
             hint_updated_at: null
           });
         });
@@ -650,7 +655,7 @@ export default function AdminDashboard() {
 
         await updateDoc(eventRef, {
           current_round: 1,
-          status: "qualifying",
+          status: "ready",
           started_at: null,
           event_start: null,
           completed_at: null,
@@ -662,7 +667,10 @@ export default function AdminDashboard() {
           paused_at: null,
           total_paused_duration_seconds: 0,
           championship_winner_id: "",
-          championship_winner_name: ""
+          championship_winner_name: "",
+          scans_locked: false,
+          leaderboard_frozen: false,
+          leaderboard_hidden: false
         });
         
         toast.dismiss(); // dismiss loading toast
@@ -742,6 +750,8 @@ export default function AdminDashboard() {
           paused_at: null,
           total_paused_duration_seconds: 0,
           scans_locked: false,
+          leaderboard_frozen: false,
+          leaderboard_hidden: false,
           championship_winner_id: "",
           championship_winner_name: "",
           broadcast_message: "",
