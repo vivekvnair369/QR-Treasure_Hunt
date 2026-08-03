@@ -84,6 +84,7 @@ export default function AdminDashboard() {
   const [champBroadcastAutoHide, setChampBroadcastAutoHide] = useState(false);
   const [champBroadcastDuration, setChampBroadcastDuration] = useState(5);
   const [broadcastsHistory, setBroadcastsHistory] = useState([]);
+  const [countdownText, setCountdownText] = useState('00:00');
 
   const safeTimestampToInputString = (ts) => {
     if (!ts) return '';
@@ -241,6 +242,31 @@ export default function AdminDashboard() {
       unsubBroadcasts();
     };
   }, []);
+
+  // Global Event Countdown Timer
+  useEffect(() => {
+    if (eventData && ['running', 'qualifying', 'championship'].includes(eventData.status) && eventData.event_start && eventData.countdown_timer_active) {
+      const interval = setInterval(() => {
+        const start = eventData.event_start.seconds ? (eventData.event_start.seconds * 1000) : (eventData.event_start.toMillis ? eventData.event_start.toMillis() : Date.now());
+        const limitSecs = (eventData.max_time_limit_minutes + eventData.grace_time_minutes) * 60;
+        const totalPauseSecs = eventData.total_paused_duration_seconds || 0;
+        
+        const now = Date.now();
+        const elapsedSecs = Math.floor((now - start) / 1000) - totalPauseSecs;
+        const remainingSecs = Math.max(0, limitSecs - elapsedSecs);
+        
+        const hrs = Math.floor(remainingSecs / 3600);
+        const mins = Math.floor((remainingSecs % 3600) / 60);
+        const secs = remainingSecs % 60;
+        
+        const pad = (num) => String(num).padStart(2, '0');
+        setCountdownText(hrs > 0 ? `${pad(hrs)}:${pad(mins)}:${pad(secs)}` : `${pad(mins)}:${pad(secs)}`);
+      }, 1000);
+      return () => clearInterval(interval);
+    } else {
+      setCountdownText('00:00');
+    }
+  }, [eventData]);
 
   // Timers and Stats calculation
   const calculateElapsedSeconds = (t) => {
@@ -1900,12 +1926,29 @@ export default function AdminDashboard() {
       {/* Side Navigation Bar */}
       <aside className="w-full md:w-64 bg-slate-900 border-r border-slate-850 p-6 flex flex-col justify-between">
         <div className="space-y-8">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center font-black text-white shadow-lg shadow-purple-500/20">A</div>
-            <div>
-              <h2 className="text-sm font-black tracking-wider text-slate-200">AITHERON ML 2026</h2>
-              <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest">Admin Console</p>
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center font-black text-white shadow-lg shadow-purple-500/20">A</div>
+              <div>
+                <h2 className="text-sm font-black tracking-wider text-slate-200">AITHERON ML 2026</h2>
+                <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest">Admin Console</p>
+              </div>
             </div>
+
+            {eventConfig?.countdown_timer_active && (
+              <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800/60 text-left space-y-1 relative overflow-hidden">
+                <span className="text-[9px] text-purple-400 font-black uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-purple-500"></span>
+                  </span>
+                  Live Timer
+                </span>
+                <div className="text-2xl font-black text-slate-100 font-mono tracking-wider timer-glow">
+                  {countdownText}
+                </div>
+              </div>
+            )}
           </div>
 
           <nav className="flex flex-col gap-2">
@@ -1941,7 +1984,7 @@ export default function AdminDashboard() {
           {/* TAB 1: Live Overview Dashboard */}
           {activeTab === 'overview' && (
             <div className="space-y-6">
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                 <div className="glass-card p-5 rounded-3xl border border-slate-900 text-left">
                   <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Registered Teams</span>
                   <div className="text-3xl font-black mt-2 text-slate-100">{teams.length}</div>
@@ -1957,6 +2000,18 @@ export default function AdminDashboard() {
                 <div className="glass-card p-5 rounded-3xl border border-slate-900 text-left">
                   <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Scan Success Rate</span>
                   <div className="text-3xl font-black mt-2 text-amber-400">{currentStats.successRateVal}%</div>
+                </div>
+                <div className="glass-card p-5 rounded-3xl border border-slate-900 text-left relative overflow-hidden">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Global Countdown</span>
+                  <div className="text-3xl font-black mt-2 text-purple-400 font-mono tracking-wider timer-glow">
+                    {eventConfig?.countdown_timer_active ? countdownText : 'Disabled'}
+                  </div>
+                  {eventConfig?.countdown_timer_active && (
+                    <span className="absolute top-2 right-2 flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-purple-500"></span>
+                    </span>
+                  )}
                 </div>
               </div>
 
