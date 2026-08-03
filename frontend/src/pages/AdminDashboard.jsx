@@ -74,7 +74,7 @@ export default function AdminDashboard() {
   const [penaltyTimeInput, setPenaltyTimeInput] = useState(5);
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [broadcastHintText, setBroadcastHintText] = useState('');
-  const [selectedBroadcastRoute, setSelectedBroadcastRoute] = useState('route_a');
+  const [selectedBroadcastRoute, setSelectedBroadcastRoute] = useState('all_routes');
   const [champBroadcastTarget, setChampBroadcastTarget] = useState('all_finalists'); // all_finalists, one_finalist, everyone
   const [champSelectedFinalistId, setChampSelectedFinalistId] = useState('');
   const [champBroadcastHintText, setChampBroadcastHintText] = useState('');
@@ -1098,16 +1098,15 @@ export default function AdminDashboard() {
     }
     try {
       toast.loading(`Broadcasting hint...`);
-      const routeRef = doc(db, 'routes', selectedBroadcastRoute);
       const hideAt = broadcastAutoHide ? new Date(Date.now() + Number(broadcastDuration) * 60 * 1000) : null;
+      const hintVal = broadcastHintText.trim();
       
       const batch = writeBatch(db);
       
-      // Update route
-      batch.update(routeRef, {
-        broadcast_hint: broadcastHintText.trim(),
-        broadcast_message: broadcastHintText.trim(),
-        current_hint: broadcastHintText.trim(),
+      const broadcastPayload = {
+        broadcast_hint: hintVal,
+        broadcast_message: hintVal,
+        current_hint: hintVal,
         broadcast_hint_auto_hide: broadcastAutoHide,
         broadcast_message_auto_hide: broadcastAutoHide,
         broadcast_hint_hide_at: hideAt,
@@ -1115,14 +1114,42 @@ export default function AdminDashboard() {
         broadcast_updated_at: serverTimestamp(),
         broadcast_hint_updated_at: serverTimestamp(),
         hint_updated_at: serverTimestamp()
-      });
+      };
+
+      let targetRouteName = '';
+      if (selectedBroadcastRoute === 'all_routes') {
+        // Update all routes
+        routes.forEach(r => {
+          batch.update(doc(db, 'routes', r.id), broadcastPayload);
+        });
+        // Also update event config
+        const eventRef = doc(db, 'events', 'active_event');
+        batch.update(eventRef, {
+          broadcast_message: hintVal,
+          broadcast_hint: hintVal,
+          current_hint: hintVal,
+          broadcast_message_auto_hide: broadcastAutoHide,
+          broadcast_hint_auto_hide: broadcastAutoHide,
+          broadcast_message_hide_at: hideAt,
+          broadcast_hint_hide_at: hideAt,
+          broadcast_message_updated_at: serverTimestamp(),
+          broadcast_hint_updated_at: serverTimestamp(),
+          broadcast_updated_at: serverTimestamp(),
+          hint_updated_at: serverTimestamp()
+        });
+        targetRouteName = 'All Routes';
+      } else {
+        const routeRef = doc(db, 'routes', selectedBroadcastRoute);
+        batch.update(routeRef, broadcastPayload);
+        targetRouteName = getRouteName(selectedBroadcastRoute);
+      }
       
       // Add broadcast history
       const historyRef = doc(collection(db, 'broadcasts'));
       batch.set(historyRef, {
         route_id: selectedBroadcastRoute,
-        route_name: getRouteName(selectedBroadcastRoute),
-        message: broadcastHintText.trim(),
+        route_name: targetRouteName,
+        message: hintVal,
         timestamp: serverTimestamp(),
         auto_hide: broadcastAutoHide,
         duration_minutes: broadcastAutoHide ? Number(broadcastDuration) : null,
@@ -1133,8 +1160,8 @@ export default function AdminDashboard() {
       await batch.commit();
       
       toast.dismiss();
-      toast.success(`Hint broadcasted to ${getRouteName(selectedBroadcastRoute)}.`);
-      await logAuditLocal('broadcast_hint', 'admin', '127.0.0.1', null, `Admin broadcasted hint to route ${selectedBroadcastRoute}: "${broadcastHintText}"`);
+      toast.success(`Hint broadcasted to ${targetRouteName}.`);
+      await logAuditLocal('broadcast_hint', 'admin', '127.0.0.1', null, `Admin broadcasted hint to ${targetRouteName}: "${hintVal}"`);
       setBroadcastHintText('');
     } catch (err) {
       toast.dismiss();
@@ -1146,12 +1173,10 @@ export default function AdminDashboard() {
   const handleClearBroadcast = async (routeId) => {
     try {
       toast.loading('Clearing broadcast...');
-      const routeRef = doc(db, 'routes', routeId);
       
       const batch = writeBatch(db);
       
-      // Clear route
-      batch.update(routeRef, {
+      const clearPayload = {
         broadcast_hint: "",
         broadcast_message: "",
         current_hint: "",
@@ -1162,13 +1187,39 @@ export default function AdminDashboard() {
         broadcast_updated_at: serverTimestamp(),
         broadcast_hint_updated_at: serverTimestamp(),
         hint_updated_at: serverTimestamp()
-      });
+      };
+
+      let targetRouteName = '';
+      if (routeId === 'all_routes') {
+        routes.forEach(r => {
+          batch.update(doc(db, 'routes', r.id), clearPayload);
+        });
+        const eventRef = doc(db, 'events', 'active_event');
+        batch.update(eventRef, {
+          broadcast_message: "",
+          broadcast_hint: "",
+          current_hint: "",
+          broadcast_message_auto_hide: false,
+          broadcast_hint_auto_hide: false,
+          broadcast_message_hide_at: null,
+          broadcast_hint_hide_at: null,
+          broadcast_message_updated_at: null,
+          broadcast_hint_updated_at: null,
+          broadcast_updated_at: null,
+          hint_updated_at: null
+        });
+        targetRouteName = 'All Routes';
+      } else {
+        const routeRef = doc(db, 'routes', routeId);
+        batch.update(routeRef, clearPayload);
+        targetRouteName = getRouteName(routeId);
+      }
       
       // Add a history item for clearing
       const historyRef = doc(collection(db, 'broadcasts'));
       batch.set(historyRef, {
         route_id: routeId,
-        route_name: getRouteName(routeId),
+        route_name: targetRouteName,
         message: " [Cleared Broadcast] ",
         timestamp: serverTimestamp(),
         auto_hide: false,
@@ -1180,8 +1231,8 @@ export default function AdminDashboard() {
       await batch.commit();
       
       toast.dismiss();
-      toast.success(`Cleared hint for ${getRouteName(routeId)}.`);
-      await logAuditLocal('clear_broadcast', 'admin', '127.0.0.1', null, `Admin cleared broadcast hint for route ${routeId}`);
+      toast.success(`Cleared hint for ${targetRouteName}.`);
+      await logAuditLocal('clear_broadcast', 'admin', '127.0.0.1', null, `Admin cleared broadcast hint for ${targetRouteName}`);
     } catch (err) {
       toast.dismiss();
       console.error(err);
@@ -1931,6 +1982,8 @@ export default function AdminDashboard() {
   const paginatedTeams = filteredTeams.slice((teamPage - 1) * teamsPerPage, teamPage * teamsPerPage);
 
   const getRouteName = (routeId) => {
+    if (routeId === 'championship') return 'Championship Round';
+    if (routeId === 'all_routes') return 'All Routes';
     const route = routes.find(r => r.id === routeId);
     return route ? route.name : 'Unassigned';
   };
@@ -2101,6 +2154,7 @@ export default function AdminDashboard() {
                           onChange={(e) => setSelectedBroadcastRoute(e.target.value)} 
                           className="w-full px-3 py-2 bg-slate-950 border border-slate-900 text-xs text-slate-300 outline-none rounded-xl"
                         >
+                          <option value="all_routes">All Routes (Everyone)</option>
                           {routes.map(r => (
                             <option key={r.id} value={r.id}>{r.name} {r.broadcast_hint ? '💬' : ''}</option>
                           ))}
@@ -2147,7 +2201,7 @@ export default function AdminDashboard() {
                         >
                           Broadcast Hint
                         </button>
-                        {routes.find(r => r.id === selectedBroadcastRoute)?.broadcast_hint && (
+                        {(selectedBroadcastRoute === 'all_routes' || routes.find(r => r.id === selectedBroadcastRoute)?.broadcast_hint) && (
                           <button 
                             type="button"
                             onClick={() => handleClearBroadcast(selectedBroadcastRoute)}
