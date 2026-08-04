@@ -948,7 +948,7 @@ export default function TeamDashboard() {
               <div className="glass-card p-6 rounded-2xl flex flex-col justify-between animate-fadeIn">
                 <div>
                   <span className="text-xs text-slate-500 font-medium">TEAM STATUS</span>
-                  <div className="my-2.5 flex items-center gap-2">
+                  <div className="my-2.5 flex items-center gap-2 flex-wrap">
                     <span className="text-xl font-black text-slate-100 uppercase truncate max-w-[150px]">{team?.team_name}</span>
                     {team?.status === 'active' && (
                       <span className="inline-flex px-3 py-1 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 animate-pulse">
@@ -960,13 +960,12 @@ export default function TeamDashboard() {
                         Paused
                       </span>
                     )}
+                    {routeInfo?.name && (
+                      <span className="inline-flex px-3 py-1 rounded-full text-xs font-bold bg-pink-500/10 text-pink-400 border border-pink-500/20">
+                        📍 {routeInfo.name}
+                      </span>
+                    )}
                   </div>
-                  {routeInfo?.name && (
-                    <div className="text-[10px] font-extrabold text-purple-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></span>
-                      Assigned Route: {routeInfo.name}
-                    </div>
-                  )}
                 </div>
                 <p className="text-xs text-slate-400">
                   {(team?.status === 'registered' || team?.status === 'waiting') && 'Checked-in. Scan the Start QR!'}
