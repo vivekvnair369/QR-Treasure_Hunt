@@ -604,7 +604,15 @@ export default function AdminDashboard() {
             original_route_id: null,
             progress_percent: 0,
             completed_clues: 0,
-            total_clues: totalClues
+            total_clues: totalClues,
+            broadcast_hint: "",
+            broadcast_message: "",
+            current_hint: "",
+            broadcast_hint_auto_hide: false,
+            broadcast_message_auto_hide: false,
+            broadcast_hint_hide_at: null,
+            broadcast_message_hide_at: null,
+            broadcast_hint_updated_at: null
           });
         });
         await batch.commit();

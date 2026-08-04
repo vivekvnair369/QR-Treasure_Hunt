@@ -532,7 +532,17 @@ export default function TeamDashboard() {
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center font-bold text-white shadow-lg shadow-purple-500/20">A</div>
             <div className="text-left">
               <h1 className="text-md font-black tracking-wider text-slate-200">{eventInfo?.name || 'AITHERON ML 2026'}</h1>
-              <p className="text-[9px] text-purple-400 font-bold uppercase tracking-widest">Team Dashboard</p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <p className="text-[9px] text-purple-400 font-bold uppercase tracking-widest">Team Dashboard</p>
+                {routeInfo?.name && (
+                  <>
+                    <span className="text-slate-650 text-[9px]">•</span>
+                    <span className="px-2 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-300 text-[8px] font-black uppercase tracking-wider">
+                      📍 {routeInfo.name}
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
           <button 
@@ -936,18 +946,26 @@ export default function TeamDashboard() {
             <div className="grid md:grid-cols-3 gap-6 mb-8 text-left">
               {/* Status Card */}
               <div className="glass-card p-6 rounded-2xl flex flex-col justify-between animate-fadeIn">
-                <span className="text-xs text-slate-500 font-medium">TEAM STATUS</span>
-                <div className="my-3 flex items-center gap-2">
-                  <span className="text-xl font-black text-slate-100 uppercase truncate max-w-[150px]">{team?.team_name}</span>
-                  {team?.status === 'active' && (
-                    <span className="inline-flex px-3 py-1 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 animate-pulse">
-                      Playing
-                    </span>
-                  )}
-                  {team?.status === 'paused' && (
-                    <span className="inline-flex px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                      Paused
-                    </span>
+                <div>
+                  <span className="text-xs text-slate-500 font-medium">TEAM STATUS</span>
+                  <div className="my-2.5 flex items-center gap-2">
+                    <span className="text-xl font-black text-slate-100 uppercase truncate max-w-[150px]">{team?.team_name}</span>
+                    {team?.status === 'active' && (
+                      <span className="inline-flex px-3 py-1 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 animate-pulse">
+                        Playing
+                      </span>
+                    )}
+                    {team?.status === 'paused' && (
+                      <span className="inline-flex px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                        Paused
+                      </span>
+                    )}
+                  </div>
+                  {routeInfo?.name && (
+                    <div className="text-[10px] font-extrabold text-purple-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></span>
+                      Assigned Route: {routeInfo.name}
+                    </div>
                   )}
                 </div>
                 <p className="text-xs text-slate-400">
