@@ -4,6 +4,7 @@ import { Award, Trophy, Clock, ArrowLeft, RefreshCw, Star } from 'lucide-react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import toast from 'react-hot-toast';
+import Footer from '../components/Footer';
 
 export default function Leaderboard() {
   const navigate = useNavigate();
@@ -259,6 +260,7 @@ export default function Leaderboard() {
           </div>
         )}
       </div>
+      <Footer />
     </div>
   );
 }

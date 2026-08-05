@@ -11,6 +11,7 @@ import {
 import { db } from '../firebase/config';
 import toast from 'react-hot-toast';
 import confetti from 'canvas-confetti';
+import Footer from '../components/Footer';
 
 export default function TeamDashboard() {
   const { team, logout } = useAuth();
@@ -1154,6 +1155,7 @@ export default function TeamDashboard() {
           </>
         )}
       </div>
+      <Footer />
     </div>
   );
 }

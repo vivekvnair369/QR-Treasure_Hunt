@@ -15,6 +15,7 @@ import { db, firebaseConfig } from '../firebase/config';
 import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, connectAuthEmulator } from 'firebase/auth';
 import toast from 'react-hot-toast';
+import Footer from '../components/Footer';
 import QRCode from 'qrcode';
 import confetti from 'canvas-confetti';
 
@@ -3166,6 +3167,7 @@ export default function AdminDashboard() {
             </div>
           )}
         </main>
+        <Footer />
       </div>
 
       {/* MODALS */}

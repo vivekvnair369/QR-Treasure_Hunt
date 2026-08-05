@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Award, Clock, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import confetti from 'canvas-confetti';
+import Footer from '../components/Footer';
 
 export default function Finished() {
   const navigate = useNavigate();
@@ -57,11 +58,12 @@ export default function Finished() {
   };
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-center p-6 text-center overflow-hidden">
+    <div className="relative min-h-screen flex flex-col items-center justify-between p-6 text-center overflow-hidden">
       <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full glow-purple animate-pulse-slow pointer-events-none"></div>
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full glow-blue pointer-events-none"></div>
 
-      <div className="z-10 max-w-lg w-full glass-card p-10 rounded-3xl border border-yellow-500/20 shadow-2xl">
+      <div className="z-10 max-w-lg w-full my-auto">
+        <div className="glass-card p-10 rounded-3xl border border-yellow-500/20 shadow-2xl">
         <div className="inline-flex p-5 rounded-full bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 mb-8 animate-bounce">
           <Award className="w-16 h-16" />
         </div>
@@ -108,7 +110,9 @@ export default function Finished() {
             Sign Out
           </button>
         </div>
+        </div>
       </div>
+      <Footer />
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { doc, getDoc, addDoc, collection, writeBatch, serverTimestamp, query, wh
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
+import Footer from '../components/Footer';
 
 export default function Scanner() {
   const navigate = useNavigate();
@@ -435,11 +436,11 @@ export default function Scanner() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 p-4 md:p-8 flex flex-col items-center justify-center relative text-slate-100 overflow-hidden">
+    <div className="min-h-screen bg-slate-950 p-4 md:p-8 flex flex-col items-center justify-between relative text-slate-100 overflow-hidden">
       {/* Glow backgrounds */}
       <div className="absolute top-1/4 left-1/4 w-96 h-96 glow-purple opacity-30 pointer-events-none"></div>
 
-      <div className="z-10 max-w-md w-full flex flex-col items-center">
+      <div className="z-10 max-w-md w-full flex flex-col items-center my-auto">
         {/* Event Header */}
         <div className="mb-6 text-center">
           <h1 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500 tracking-wider">
@@ -670,6 +671,7 @@ export default function Scanner() {
           </div>
         )}
       </div>
+      <Footer />
     </div>
   );
 }

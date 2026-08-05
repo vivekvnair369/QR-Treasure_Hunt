@@ -1,17 +1,18 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Compass, Users, ShieldAlert, Award } from 'lucide-react';
+import Footer from '../components/Footer';
 
 export default function Landing() {
   const navigate = useNavigate();
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-center p-6 text-center select-none overflow-hidden">
+    <div className="relative min-h-screen flex flex-col items-center justify-between p-6 text-center select-none overflow-hidden">
       {/* Background Ornaments */}
-      <div className="absolute top-10 left-10 w-72 h-72 rounded-full glow-purple animate-pulse-slow pointer-events-none"></div>
-      <div className="absolute bottom-10 right-10 w-96 h-96 rounded-full glow-blue animate-pulse-slow pointer-events-none"></div>
+      <div className="absolute top-10 left-10 w-72 h-72 rounded-full glow-purple opacity-20 pointer-events-none"></div>
+      <div className="absolute bottom-10 right-10 w-96 h-96 rounded-full glow-blue opacity-20 pointer-events-none"></div>
 
-      <div className="z-10 max-w-2xl w-full">
+      <div className="z-10 max-w-2xl w-full my-auto">
         {/* Animated Icon */}
         <div className="inline-flex p-5 rounded-full bg-purple-500/10 border border-purple-500/30 mb-8 animate-bounce">
           <Compass className="w-16 h-16 text-purple-400" />
@@ -66,6 +67,7 @@ export default function Landing() {
           </button>
         </div>
       </div>
+      <Footer />
     </div>
   );
 }

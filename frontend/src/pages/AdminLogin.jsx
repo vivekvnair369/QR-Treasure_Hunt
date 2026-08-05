@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Shield, Key, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
+import Footer from '../components/Footer';
 
 export default function AdminLogin() {
   const { adminLogin, isAuthenticated, user } = useAuth();
@@ -38,7 +39,7 @@ export default function AdminLogin() {
   };
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-center p-6 overflow-hidden">
+    <div className="relative min-h-screen flex flex-col items-center justify-between p-6 overflow-hidden">
       <div className="absolute top-1/4 left-1/4 w-80 h-80 rounded-full glow-blue animate-pulse-slow pointer-events-none"></div>
       
       {/* Return button */}
@@ -50,7 +51,7 @@ export default function AdminLogin() {
         Back to portal
       </button>
 
-      <div className="z-10 w-full max-w-md">
+      <div className="z-10 w-full max-w-md my-auto">
         <div className="glass-card p-8 rounded-3xl shadow-2xl border border-slate-800">
           <div className="flex flex-col items-center mb-8">
             <div className="p-4 rounded-full bg-blue-500/10 border border-blue-500/20 mb-4">
@@ -106,6 +107,7 @@ export default function AdminLogin() {
           </form>
         </div>
       </div>
+      <Footer />
     </div>
   );
 }
